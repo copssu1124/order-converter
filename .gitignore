@@ -1,0 +1,21 @@
+# 빌드 결과물
+dist/
+build/
+*.spec
+# 파이썬 캐시
+__pycache__/
+*.pyc
+# 백업 파일
+*_backup_*.py
+*backup*.py
+# 엑셀 전부 (매핑표·주문서·결과 = 영업정보, 절대 공개 금지)
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+# 결과 폴더
+변환결과/
+결과/
+# Claude Code 로컬 설정 / 작업 부산물(백업·임시 스크립트)
+.claude/
+클로드_작업파일/

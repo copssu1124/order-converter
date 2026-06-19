@@ -1,18 +1,43 @@
 # -*- coding: utf-8 -*-
 """주문서 변환기 GUI — step3_convert 의 convert()/분석함수를 호출 (변환 로직 미수정)."""
 import os
+import re
 import sys
+import json
 import queue
 import threading
 import traceback
 import webbrowser
+import urllib.request
 import tkinter as tk
 from tkinter import filedialog, scrolledtext, ttk
+import tkinter.font as tkfont
 
 import step3_convert as engine
 
+VERSION = "2.7"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
-CREDIT = "Developed by Jeong-woo Jang · JJ COMPANY"
+CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
+GITHUB_REPO = "copssu1124/order-converter"
+RELEASES_URL = "https://github.com/copssu1124/order-converter/releases/latest"
+
+_CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+
+
+def _번호(n):
+    return _CIRCLED[n - 1] if 1 <= n <= len(_CIRCLED) else "(%d)" % n
+
+
+def _버전튜플(s):
+    """'v2.7' / '2.7' → (2, 7). 실패 시 None."""
+    try:
+        s = str(s).strip().lstrip("vV")
+        parts = re.findall(r"\d+", s)
+        if not parts:
+            return None
+        return tuple(int(x) for x in parts[:2])
+    except Exception:
+        return None
 
 
 def app_dir():
@@ -106,12 +131,28 @@ class ConverterApp:
         self.split_dir = None
         self.log_queue = queue.Queue()
 
-        root.title("주문서 변환기 · JJ COMPANY")
-        root.geometry("940x660")
-        root.minsize(860, 560)
+        # ── 전체 UI 폰트: 맑은 고딕으로 통일 + 크게 ──
+        for _nm, _sz in (("TkDefaultFont", 11), ("TkTextFont", 11),
+                         ("TkMenuFont", 11), ("TkHeadingFont", 12),
+                         ("TkFixedFont", 11), ("TkIconFont", 11),
+                         ("TkTooltipFont", 11)):
+            try:
+                tkfont.nametofont(_nm).configure(family="맑은 고딕", size=_sz)
+            except Exception:
+                pass
+        try:
+            _style = ttk.Style()
+            _style.configure("TNotebook.Tab", font=("맑은 고딕", 13, "bold"),
+                             padding=(18, 9))
+        except Exception:
+            pass
+
+        root.title("주문서 변환기 · JJ COMPANY   v" + VERSION)
+        root.geometry("1040x820")
+        root.minsize(940, 720)
 
         root.rowconfigure(0, weight=3)   # 탭(노트북)
-        root.rowconfigure(1, weight=2)   # 공용 로그
+        root.rowconfigure(1, weight=3)   # 공용 로그(크게)
         root.rowconfigure(2, weight=0)   # 하단
         root.columnconfigure(0, weight=1)
 
@@ -125,12 +166,12 @@ class ConverterApp:
         tab1.columnconfigure(0, weight=1)   # 설명서
         tab1.columnconfigure(1, weight=2)   # 작업
 
-        left1 = tk.LabelFrame(tab1, text="📖 설명서", font=("맑은 고딕", 10, "bold"))
+        left1 = tk.LabelFrame(tab1, text="📖 설명서", font=("맑은 고딕", 12, "bold"))
         left1.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=4)
         left1.rowconfigure(0, weight=1)
         left1.columnconfigure(0, weight=1)
-        guide = scrolledtext.ScrolledText(left1, width=38, wrap="word",
-                                          font=("맑은 고딕", 9), bg="#FAFAFA")
+        guide = scrolledtext.ScrolledText(left1, width=34, wrap="word",
+                                          font=("맑은 고딕", 11), bg="#FAFAFA")
         guide.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         guide.insert("1.0", GUIDE)
         guide.config(state="disabled")
@@ -150,7 +191,7 @@ class ConverterApp:
         self.lbl_mapping.grid(row=3, column=0, sticky="ew", padx=2)
 
         self.btn_run = tk.Button(btns, text="③  변환 실행", height=2,
-                                 bg="#2E7D32", fg="white", font=("맑은 고딕", 11, "bold"),
+                                 bg="#2E7D32", fg="white", font=("맑은 고딕", 13, "bold"),
                                  command=self.run_convert)
         self.btn_run.grid(row=4, column=0, sticky="ew", pady=(8, 2))
         self.btn_open = tk.Button(btns, text="④  결과 폴더 열기", height=2,
@@ -164,12 +205,12 @@ class ConverterApp:
         tab2.columnconfigure(0, weight=1)
         tab2.columnconfigure(1, weight=2)
 
-        left2 = tk.LabelFrame(tab2, text="📖 택배사 분리 안내", font=("맑은 고딕", 10, "bold"))
+        left2 = tk.LabelFrame(tab2, text="📖 택배사 분리 안내", font=("맑은 고딕", 12, "bold"))
         left2.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=4)
         left2.rowconfigure(0, weight=1)
         left2.columnconfigure(0, weight=1)
-        guide2 = scrolledtext.ScrolledText(left2, width=38, wrap="word",
-                                           font=("맑은 고딕", 9), bg="#FAFAFA")
+        guide2 = scrolledtext.ScrolledText(left2, width=34, wrap="word",
+                                           font=("맑은 고딕", 11), bg="#FAFAFA")
         guide2.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         guide2.insert("1.0", GUIDE2)
         guide2.config(state="disabled")
@@ -179,42 +220,43 @@ class ConverterApp:
         sp.columnconfigure(0, weight=1)
 
         tk.Button(sp, text="①  변환완료 파일 불러오기", height=2,
-                  bg="#E3F2FD", font=("맑은 고딕", 11, "bold"),
+                  bg="#E3F2FD", font=("맑은 고딕", 13, "bold"),
                   command=self.pick_conv).grid(row=0, column=0, sticky="ew", pady=2)
         self.lbl_conv = tk.Label(sp, text="분리할 파일: (선택 안 됨)", anchor="w", fg="#555")
         self.lbl_conv.grid(row=1, column=0, sticky="ew", padx=2)
 
         tk.Label(sp, text="②  발화주명 (보내는 회사)", anchor="w",
-                 font=("맑은 고딕", 10, "bold")).grid(row=2, column=0, sticky="ew",
+                 font=("맑은 고딕", 12, "bold")).grid(row=2, column=0, sticky="ew",
                                                       padx=2, pady=(10, 0))
-        self.entry_발화 = tk.Entry(sp, font=("맑은 고딕", 11))
+        self.entry_발화 = tk.Entry(sp, font=("맑은 고딕", 12))
         self.entry_발화.grid(row=3, column=0, sticky="ew", padx=2, pady=(2, 4))
 
         self.btn_split = tk.Button(sp, text="③  택배사 분리 실행", height=2,
-                                   bg="#1565C0", fg="white", font=("맑은 고딕", 11, "bold"),
+                                   bg="#1565C0", fg="white", font=("맑은 고딕", 13, "bold"),
                                    command=self.run_split)
         self.btn_split.grid(row=4, column=0, sticky="ew", pady=(8, 2))
         self.btn_split_open = tk.Button(sp, text="④  분리 폴더 열기", height=2,
                                         state="disabled", command=self.open_split_folder)
         self.btn_split_open.grid(row=5, column=0, sticky="ew", pady=2)
 
-        # ═══════════ 공용 로그 ═══════════
+        # ═══════════ 공용 로그 (크게·또렷) ═══════════
         logframe = tk.LabelFrame(root, text="📂 진행 상황 · 오류 리포트",
-                                 font=("맑은 고딕", 10, "bold"))
+                                 font=("맑은 고딕", 13, "bold"))
         logframe.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 4))
         logframe.rowconfigure(0, weight=1)
         logframe.columnconfigure(0, weight=1)
-        self.logbox = scrolledtext.ScrolledText(logframe, font=("Consolas", 9),
-                                                state="disabled", wrap="word", height=8)
-        self.logbox.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        self.logbox = scrolledtext.ScrolledText(logframe, font=("맑은 고딕", 12),
+                                                state="disabled", wrap="word",
+                                                height=16, spacing1=1, spacing3=1)
+        self.logbox.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
 
         # ═══════════ 하단: 제작자 + 카카오톡 ═══════════
         bottom = tk.Frame(root, bg="#ECEFF1")
         bottom.grid(row=2, column=0, sticky="ew")
         tk.Label(bottom, text=CREDIT, bg="#ECEFF1", fg="#37474F",
-                 font=("Segoe UI", 9)).pack(side="left", padx=12, pady=6)
+                 font=("맑은 고딕", 10)).pack(side="left", padx=12, pady=6)
         link = tk.Label(bottom, text="💬 카카오톡 문의", bg="#ECEFF1", fg="#1565C0",
-                        cursor="hand2", font=("맑은 고딕", 9, "underline"))
+                        cursor="hand2", font=("맑은 고딕", 10, "underline"))
         link.pack(side="right", padx=12, pady=6)
         link.bind("<Button-1>", lambda e: webbrowser.open(KAKAO))
 
@@ -225,6 +267,7 @@ class ConverterApp:
 
         self.log("주문서를 불러오고 [변환 실행]을 누르세요.")
         self._drain_log()
+        self._start_update_check()       # 백그라운드 최신버전 확인(알림형)
 
     # ── 로그 ──
     def log(self, msg):
@@ -295,15 +338,10 @@ class ConverterApp:
             out, 사유 = engine.convert_v2(self.input_file, self.mapping_file,
                                           out_path, log=self.log)
             self.output_file = out
-            self.log("─" * 38)
-            if 사유:
-                self.log("⚠ 수동확인(빨강) %d건 — 결과 '비고'열에도 기입됨:" % len(사유))
-                for excel_row, 상품, reason in 사유:
-                    self.log("  · 행%d  %s\n       → %s" % (excel_row, str(상품)[:28], reason))
-            else:
-                self.log("✅ 수동확인 0건 — 모두 정상 매칭되었습니다.")
-            self.log("─" * 38)
-            self.log("✅ 저장 완료: " + out)
+            총, 정상, 이슈 = engine.상세리포트(out, 사유)
+            self._리포트출력(총, 정상, 이슈)
+            self.log("")
+            self.log("💾 저장 완료: " + out)
             self.root.after(0, lambda: self.btn_open.config(state="normal"))
         except Exception as ex:
             self.log("─" * 38)
@@ -320,6 +358,82 @@ class ConverterApp:
             os.startfile(os.path.dirname(self.output_file))
         except Exception as ex:
             self.log("폴더 열기 실패: " + str(ex))
+
+    # ── 변환 결과 리포트 (친절한 안내) ──
+    def _리포트출력(self, 총, 정상, 이슈):
+        self.log("")
+        self.log("════════════════════════════")
+        self.log("   변환 완료!     총 %d건" % 총)
+        self.log("   ✅ 잘 된 것 : %d건" % 정상)
+        self.log("   ⚠️ 확인이 필요한 것 : %d건" % len(이슈))
+        self.log("════════════════════════════")
+        if not 이슈:
+            self.log("")
+            self.log("✅ 모두 정상으로 변환됐어요!")
+            return
+        self.log("")
+        self.log("[확인이 필요한 항목]")
+        self.log("")
+        for i, it in enumerate(이슈, 1):
+            상품 = str(it.get('상품명') or '').strip()
+            수량 = it.get('수량')
+            제목 = '%s 엑셀 %d행 — "%s"' % (_번호(i), it['행'], 상품[:42])
+            if 수량 not in (None, ''):
+                제목 += "  (수량 %s개)" % 수량
+            self.log(제목)
+            self.log("     문제 : " + it['문제'])
+            self.log("     해결 : " + it['해결'])
+            self.log("")
+
+    # ── 자동 업데이트 (알림형: 확인 + 브라우저 열기만) ──
+    def _start_update_check(self):
+        threading.Thread(target=self._check_update, daemon=True).start()
+
+    def _check_update(self):
+        try:
+            url = "https://api.github.com/repos/%s/releases/latest" % GITHUB_REPO
+            req = urllib.request.Request(url, headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "order-converter"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            최신 = _버전튜플(str(data.get("tag_name", "")))
+            현재 = _버전튜플(VERSION)
+            if 최신 and 현재 and 최신 > 현재:
+                disp = "%d.%d" % 최신
+                self.root.after(0, lambda: self._update_popup(disp))
+        except Exception:
+            pass    # 네트워크 불가/타임아웃/404(Releases 없음) → 조용히 무시
+
+    def _update_popup(self, new_ver):
+        try:
+            win = tk.Toplevel(self.root)
+            win.title("업데이트 알림")
+            win.transient(self.root)
+            win.resizable(False, False)
+            tk.Label(win, text="🎉 새 버전 v%s 이(가) 나왔어요!" % new_ver,
+                     font=("맑은 고딕", 14, "bold")).pack(padx=34, pady=(22, 6))
+            tk.Label(win, text="받으시겠어요?",
+                     font=("맑은 고딕", 12)).pack(pady=(0, 16))
+            bar = tk.Frame(win)
+            bar.pack(pady=(0, 20))
+
+            def 받기():
+                webbrowser.open(RELEASES_URL)
+                win.destroy()
+
+            tk.Button(bar, text="받기", width=10, height=1, bg="#2E7D32", fg="white",
+                      font=("맑은 고딕", 12, "bold"), command=받기).pack(side="left", padx=10)
+            tk.Button(bar, text="나중에", width=10, height=1,
+                      font=("맑은 고딕", 12), command=win.destroy).pack(side="left", padx=10)
+            win.update_idletasks()
+            rx, ry = self.root.winfo_rootx(), self.root.winfo_rooty()
+            rw, rh = self.root.winfo_width(), self.root.winfo_height()
+            ww, wh = win.winfo_width(), win.winfo_height()
+            win.geometry("+%d+%d" % (rx + (rw - ww) // 2, ry + (rh - wh) // 3))
+            win.grab_set()
+        except Exception:
+            pass
 
     # ── ② 발주서 분리 ──
     def pick_conv(self):

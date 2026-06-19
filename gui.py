@@ -7,6 +7,8 @@ import json
 import queue
 import threading
 import traceback
+import tempfile
+import subprocess
 import webbrowser
 import urllib.request
 import tkinter as tk
@@ -15,7 +17,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "2.7"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "2.8"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -385,7 +387,7 @@ class ConverterApp:
             self.log("     해결 : " + it['해결'])
             self.log("")
 
-    # ── 자동 업데이트 (알림형: 확인 + 브라우저 열기만) ──
+    # ── 자동 업데이트 (원클릭 반자동: 다운로드 → 교체 → 재시작) ──
     def _start_update_check(self):
         threading.Thread(target=self._check_update, daemon=True).start()
 
@@ -399,33 +401,49 @@ class ConverterApp:
                 data = json.loads(resp.read().decode("utf-8"))
             최신 = _버전튜플(str(data.get("tag_name", "")))
             현재 = _버전튜플(VERSION)
+            dl = None
+            assets = data.get("assets") or []
+            for a in assets:                       # .exe 자산의 직접 다운로드 주소
+                if str(a.get("name", "")).lower().endswith(".exe"):
+                    dl = a.get("browser_download_url"); break
+            if not dl and assets:
+                dl = assets[0].get("browser_download_url")
             if 최신 and 현재 and 최신 > 현재:
                 disp = "%d.%d" % 최신
-                self.root.after(0, lambda: self._update_popup(disp))
+                self.root.after(0, lambda: self._update_popup(disp, dl))
         except Exception:
             pass    # 네트워크 불가/타임아웃/404(Releases 없음) → 조용히 무시
 
-    def _update_popup(self, new_ver):
+    def _update_popup(self, new_ver, download_url):
         try:
             win = tk.Toplevel(self.root)
-            win.title("업데이트 알림")
+            win.title("업데이트")
             win.transient(self.root)
             win.resizable(False, False)
             tk.Label(win, text="🎉 새 버전 v%s 이(가) 나왔어요!" % new_ver,
-                     font=("맑은 고딕", 14, "bold")).pack(padx=34, pady=(22, 6))
-            tk.Label(win, text="받으시겠어요?",
-                     font=("맑은 고딕", 12)).pack(pady=(0, 16))
+                     font=("맑은 고딕", 14, "bold")).pack(padx=40, pady=(22, 4))
+            tk.Label(win, text="지금 업데이트할까요?",
+                     font=("맑은 고딕", 12)).pack(pady=(0, 10))
+            status = tk.Label(win, text="", font=("맑은 고딕", 11), fg="#1565C0")
+            status.pack(pady=(0, 6))
             bar = tk.Frame(win)
-            bar.pack(pady=(0, 20))
+            bar.pack(pady=(0, 18))
 
-            def 받기():
-                webbrowser.open(RELEASES_URL)
-                win.destroy()
+            btn_later = tk.Button(bar, text="나중에", width=10, height=1,
+                                  font=("맑은 고딕", 12), command=win.destroy)
 
-            tk.Button(bar, text="받기", width=10, height=1, bg="#2E7D32", fg="white",
-                      font=("맑은 고딕", 12, "bold"), command=받기).pack(side="left", padx=10)
-            tk.Button(bar, text="나중에", width=10, height=1,
-                      font=("맑은 고딕", 12), command=win.destroy).pack(side="left", padx=10)
+            def 지금():
+                btn_now.config(state="disabled")
+                btn_later.config(state="disabled")
+                threading.Thread(target=self._do_update,
+                                 args=(download_url, win, status, btn_later),
+                                 daemon=True).start()
+
+            btn_now = tk.Button(bar, text="지금 업데이트", width=12, height=1,
+                                bg="#2E7D32", fg="white", font=("맑은 고딕", 12, "bold"),
+                                command=지금)
+            btn_now.pack(side="left", padx=8)
+            btn_later.pack(side="left", padx=8)
             win.update_idletasks()
             rx, ry = self.root.winfo_rootx(), self.root.winfo_rooty()
             rw, rh = self.root.winfo_width(), self.root.winfo_height()
@@ -434,6 +452,100 @@ class ConverterApp:
             win.grab_set()
         except Exception:
             pass
+
+    def _set_status(self, status, text, color="#1565C0"):
+        self.root.after(0, lambda: status.config(text=text, fg=color))
+
+    def _manual_fallback(self, win, status, msg, btn_later=None):
+        def show():
+            status.config(text=msg, fg="#C62828")
+            link = tk.Label(win, text="👉 수동 다운로드 (Releases 페이지 열기)",
+                            fg="#1565C0", cursor="hand2",
+                            font=("맑은 고딕", 11, "underline"))
+            link.pack(pady=(2, 14))
+            link.bind("<Button-1>", lambda e: webbrowser.open(RELEASES_URL))
+            if btn_later is not None:
+                btn_later.config(state="normal")
+        self.root.after(0, show)
+
+    def _do_update(self, download_url, win, status, btn_later):
+        # 1) exe(frozen)일 때만 자가교체 가능
+        if not getattr(sys, "frozen", False):
+            self._manual_fallback(win, status,
+                "개발 모드(.py 실행)에선 자동 교체가 안 돼요. 수동으로 받아주세요.", btn_later)
+            return
+        if not download_url:
+            self._manual_fallback(win, status,
+                "다운로드 주소를 찾지 못했어요. 수동으로 받아주세요.", btn_later)
+            return
+        target = sys.executable
+        # 2) 교체 권한(쓰기) 확인 — 관리자 폴더(Program Files 등)면 폴백
+        try:
+            _t = os.path.join(os.path.dirname(target), ".__upd_test__")
+            with open(_t, "w") as f:
+                f.write("x")
+            os.remove(_t)
+        except Exception:
+            self._manual_fallback(win, status,
+                "이 위치는 자동 교체 권한이 없어요(관리자 폴더). 수동으로 받아주세요.", btn_later)
+            return
+        # 3) 다운로드
+        tmp = os.path.join(tempfile.gettempdir(), "OrderConverter_update.exe")
+        try:
+            self._set_status(status, "다운로드 준비 중...")
+            req = urllib.request.Request(download_url,
+                                         headers={"User-Agent": "order-converter"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                total = int(resp.headers.get("Content-Length", 0) or 0)
+                done = 0
+                with open(tmp, "wb") as f:
+                    while True:
+                        chunk = resp.read(262144)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        done += len(chunk)
+                        if total:
+                            self._set_status(status, "다운로드 중... %d%%" % int(done * 100 / total))
+                        else:
+                            self._set_status(status, "다운로드 중... %d MB" % (done // 1048576))
+            if os.path.getsize(tmp) < 1048576:        # 1MB 미만이면 비정상
+                raise RuntimeError("받은 파일이 너무 작습니다")
+            # 4) 배치로 교체 + 재시작 예약 후 현재 프로그램 종료
+            self._set_status(status, "교체 후 자동 재시작합니다...", "#2E7D32")
+            self._launch_replace_bat(tmp, target)
+            self.root.after(400, self._quit_for_update)
+        except Exception as ex:
+            self._manual_fallback(win, status,
+                "자동 업데이트 실패: %s" % str(ex)[:60], btn_later)
+
+    def _quit_for_update(self):
+        try:
+            self.root.destroy()
+        finally:
+            os._exit(0)
+
+    def _launch_replace_bat(self, tmp_exe, target_exe):
+        """실행 중 exe는 잠겨 있어 못 덮어씀 → 배치가 종료 대기 후 교체·재시작·자기삭제."""
+        bat = os.path.join(tempfile.gettempdir(), "OrderConverter_update.bat")
+        lines = [
+            "@echo off",
+            "set /a n=0",
+            ":retry",
+            "ping -n 2 127.0.0.1 >nul",            # 약 1초 대기(=종료 대기)
+            'move /y "%s" "%s" >nul 2>&1' % (tmp_exe, target_exe),
+            "if not errorlevel 1 goto run",
+            "set /a n+=1",
+            "if %n% lss 40 goto retry",             # 최대 ~80초 재시도(무한루프 방지)
+            ":run",
+            'start "" "%s"' % target_exe,           # 새(또는 기존) 버전 실행
+            'del "%~f0"',                            # 배치 자기삭제
+        ]
+        # 한글 경로를 cmd가 그대로 읽도록 시스템 ANSI 코드페이지(mbcs)로 기록
+        with open(bat, "w", encoding="mbcs", errors="replace") as f:
+            f.write("\r\n".join(lines) + "\r\n")
+        DETACHED = 0x00000008                        # DETACHED_PROCESS (부모 종료 후에도 생존)
+        subprocess.Popen(["cmd", "/c", bat], creationflags=DETACHED, close_fds=True)
 
     # ── ② 발주서 분리 ──
     def pick_conv(self):

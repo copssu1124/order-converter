@@ -17,7 +17,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "2.9"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "3.0"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -40,6 +40,26 @@ def _버전튜플(s):
         return tuple(int(x) for x in parts[:2])
     except Exception:
         return None
+
+
+def _검증_다운로드(path, expected_size):
+    """받은 업데이트 파일이 정상 exe인지 검증 → (ok, 사유).
+       ① Content-Length 일치(부분 다운로드 차단) ② 최소 1MB ③ PE 시그니처(MZ)."""
+    try:
+        size = os.path.getsize(path)
+    except OSError as e:
+        return False, "파일 확인 실패: %s" % e
+    if expected_size and size != expected_size:
+        return False, "다운로드가 중간에 끊겼어요(%d/%d바이트)" % (size, expected_size)
+    if size < 1048576:
+        return False, "받은 파일이 너무 작습니다"
+    try:
+        with open(path, "rb") as f:
+            if f.read(2) != b"MZ":
+                return False, "받은 파일이 정상 실행파일이 아니에요"
+    except OSError as e:
+        return False, "파일 읽기 실패: %s" % e
+    return True, ""
 
 
 def app_dir():
@@ -489,8 +509,9 @@ class ConverterApp:
             self._manual_fallback(win, status,
                 "이 위치는 자동 교체 권한이 없어요(관리자 폴더). 수동으로 받아주세요.", btn_later)
             return
-        # 3) 다운로드
+        # 3) 다운로드 (.part로 받아 검증 통과분만 최종 파일로 확정 — 손상/부분 파일 차단)
         tmp = os.path.join(tempfile.gettempdir(), "OrderConverter_update.exe")
+        part = tmp + ".part"
         try:
             self._set_status(status, "다운로드 준비 중...")
             req = urllib.request.Request(download_url,
@@ -498,7 +519,7 @@ class ConverterApp:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 total = int(resp.headers.get("Content-Length", 0) or 0)
                 done = 0
-                with open(tmp, "wb") as f:
+                with open(part, "wb") as f:
                     while True:
                         chunk = resp.read(262144)
                         if not chunk:
@@ -509,13 +530,20 @@ class ConverterApp:
                             self._set_status(status, "다운로드 중... %d%%" % int(done * 100 / total))
                         else:
                             self._set_status(status, "다운로드 중... %d MB" % (done // 1048576))
-            if os.path.getsize(tmp) < 1048576:        # 1MB 미만이면 비정상
-                raise RuntimeError("받은 파일이 너무 작습니다")
+            ok, 사유 = _검증_다운로드(part, total)    # 길이일치·최소크기·MZ 시그니처
+            if not ok:
+                raise RuntimeError(사유)
+            os.replace(part, tmp)                      # 검증 통과분만 최종 파일로 확정
             # 4) 배치로 교체 + 재시작 예약 후 현재 프로그램 종료
             self._set_status(status, "교체 후 자동 재시작합니다...", "#2E7D32")
             self._launch_replace_bat(tmp, target)
             self.root.after(400, self._quit_for_update)
         except Exception as ex:
+            try:
+                if os.path.exists(part):
+                    os.remove(part)
+            except OSError:
+                pass
             self._manual_fallback(win, status,
                 "자동 업데이트 실패: %s" % str(ex)[:60], btn_later)
 
@@ -526,20 +554,41 @@ class ConverterApp:
             os._exit(0)
 
     def _launch_replace_bat(self, tmp_exe, target_exe):
-        """실행 중 exe는 잠겨 있어 못 덮어씀 → 배치가 종료 대기 후 교체·재시작·자기삭제."""
+        """실행 중 exe는 잠겨 있어 못 덮어씀 → 배치가 종료 대기 후 교체·재시작.
+           안전망: 교체 전 원본을 .bak로 백업하고, 새 버전이 안 뜨면 원본을 복원(브릭 방지)."""
         bat = os.path.join(tempfile.gettempdir(), "OrderConverter_update.bat")
+        bak = target_exe + ".bak"
+        exe_name = os.path.basename(target_exe)
         lines = [
             "@echo off",
+            'copy /y "%s" "%s" >nul 2>&1' % (target_exe, bak),   # 원본 백업(실행중에도 읽기복사 가능)
+            'if not exist "%s" goto norepl' % bak,               # 백업 실패(디스크풀 등) → 교체 포기(브릭 방지)
             "set /a n=0",
             ":retry",
-            "ping -n 2 127.0.0.1 >nul",            # 약 1초 대기(=종료 대기)
+            "ping -n 2 127.0.0.1 >nul",                          # 약 1초 대기(=종료 대기)
             'move /y "%s" "%s" >nul 2>&1' % (tmp_exe, target_exe),
-            "if not errorlevel 1 goto run",
+            "if not errorlevel 1 goto launch",
             "set /a n+=1",
-            "if %n% lss 40 goto retry",             # 최대 ~80초 재시도(무한루프 방지)
-            ":run",
-            'start "" "%s"' % target_exe,           # 새(또는 기존) 버전 실행
-            'del "%~f0"',                            # 배치 자기삭제
+            "if %n% lss 40 goto retry",                          # 최대 ~80초 재시도(무한루프 방지)
+            'start "" "%s"' % target_exe,                        # 교체 실패 → 원본(미교체) 그대로 실행
+            "goto cleanup",
+            ":norepl",                                           # 백업 못 만듦 → 원본 그대로 실행(미교체)
+            'start "" "%s"' % target_exe,
+            "goto cleanup",
+            ":launch",
+            'start "" "%s"' % target_exe,                        # 새 버전 실행
+            "set /a m=0",
+            ":check",                                            # 새 버전 기동 확인(최대 ~10초)
+            "ping -n 3 127.0.0.1 >nul",
+            'tasklist /fi "imagename eq %s" 2>nul | find /i "%s" >nul' % (exe_name, exe_name),
+            "if not errorlevel 1 goto cleanup",
+            "set /a m+=1",
+            "if %m% lss 4 goto check",
+            'if exist "%s" move /y "%s" "%s" >nul 2>&1' % (bak, bak, target_exe),  # 기동 실패 → 롤백
+            'if exist "%s" start "" "%s"' % (target_exe, target_exe),
+            ":cleanup",
+            'if exist "%s" del "%s" >nul 2>&1' % (bak, bak),     # 백업 정리
+            'del "%~f0"',                                        # 배치 자기삭제
         ]
         # 한글 경로를 cmd가 그대로 읽도록 시스템 ANSI 코드페이지(mbcs)로 기록
         with open(bat, "w", encoding="mbcs", errors="replace") as f:

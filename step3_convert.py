@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import glob
+import math
 import datetime
 import pandas as pd
 import unicodedata
@@ -47,6 +48,27 @@ def 묶음수량계산(회사상품명, 수량):
     if re.search(r'\(\d+매\)', 회사상품명):
         return 수량
     return 1
+
+
+# ─────────────────────────────────────────────────────────
+# 수량 안전 변환 — 주문서 수량 셀이 비정수면 크래시 대신 '수동확인' 유도
+# ─────────────────────────────────────────────────────────
+def 수량파싱(수량_raw):
+    """주문서 수량 셀 → (정수수량, 이상여부).
+       정상 정수/빈칸 → (n, False). 콤마/단위 텍스트·소수·0·음수 → (안전값, True).
+       이상=True면 호출부에서 '수동확인'으로 표시(잘못된 금액 출력·전체 크래시 방지)."""
+    if pd.isna(수량_raw):
+        return 1, False
+    try:
+        f = float(str(수량_raw).replace(',', '').strip())
+    except (ValueError, TypeError):
+        return 1, True
+    if not math.isfinite(f):    # 'nan'/'inf' 문자열 → 비정상('inf'는 int()서 OverflowError)
+        return 1, True
+    n = int(f)
+    if f != n or n <= 0:        # 소수·0·음수 = 비정상
+        return (n if n >= 1 else 1), True
+    return n, False
 
 
 # ─────────────────────────────────────────────────────────
@@ -359,7 +381,7 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
 
         선택사항 = 주문서.iloc[idx, 7]
         수량_raw = 주문서.iloc[idx, 10]
-        수량 = int(수량_raw) if pd.notna(수량_raw) else 1
+        수량, 수량이상 = 수량파싱(수량_raw)
         키 = str(선택사항).strip() if pd.notna(선택사항) and str(선택사항).strip() \
              else str(상품명).strip()
 
@@ -407,6 +429,11 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
                     단가 = int(씨제이택배비표[씨제이등급])
                     배송비합계 = 단가 * 묶음수량
                     fee = 단가
+                elif carrier in ('씨제이', '로젠', '대신택배'):
+                    # 등급 택배사인데 등급이 가격표에 없음 → 값('5*대신택배')의 선두 숫자를
+                    # 운임으로 오인하면 안 됨. 빈칸(요금택배사 빈칸=빨강) 처리해 수동확인 유도.
+                    배송비합계 = None
+                    fee = None
                 else:
                     m = re.match(r'^(\d+)', 값)
                     if m:                              # 숫자로 시작 → 이미 총액
@@ -437,6 +464,13 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
                 is_수동확인 = True
                 택배사_disp = '수동확인'
                 택배비표시 = '수동확인'
+
+        if 수량이상:                       # 수량 칸이 숫자가 아니거나 0·음수 → 수동확인(빨강)
+            택배사_disp = '수동확인'
+            is_수동확인 = True
+            fee = None
+            배송비합계 = None
+            택배비표시 = '수동확인'
 
         결과목록.append({
             '행': idx, '상품결과': 상품결과, '회사상품명': 회사상품명,
@@ -570,12 +604,17 @@ def 분석_수동확인사유(input_file, mapping_file, output_file, log=print):
             break
         선택사항 = 주문서.iloc[idx, 7]
         수량_raw = 주문서.iloc[idx, 10]
-        수량 = int(수량_raw) if pd.notna(수량_raw) else 1
+        수량, 수량이상 = 수량파싱(수량_raw)
         키 = str(선택사항).strip() if pd.notna(선택사항) and str(선택사항).strip() \
              else str(상품명).strip()
 
-        상품결과, 방식 = 변환시도(키, 수량)
         excel_row = idx + 2
+        if 수량이상:                       # 수량 칸 비정상 → 수동확인 사유로 표시
+            사유목록.append((excel_row, str(상품명),
+                           "수량 확인 필요 (수량 칸에 숫자만 적어 주세요)"))
+            continue
+
+        상품결과, 방식 = 변환시도(키, 수량)
         if 방식 == "매핑실패":
             사유목록.append((excel_row, str(상품명),
                            "상품명 미등록 (상품명변경 탭에 옵션명 없음)"))
@@ -614,6 +653,8 @@ def 상세리포트(output_file, 사유목록):
     해결_상품명없음 = '매핑표(상품명변경 탭)에 이 상품을 새로 추가해 주세요.'
     문제_배송비없음 = '이 상품의 택배비가 매핑표에 안 적혀 있어요.'
     해결_배송비없음 = '매핑표(판매비변경 탭)에서 이 상품의 "상품명*수량" 칸에 택배비를 적어 주세요.'
+    문제_수량이상 = '수량 칸 값을 숫자로 읽지 못했어요(빈칸·문자·0·음수).'
+    해결_수량이상 = '주문서 수량 칸에 숫자만(예: 2) 적어 주세요.'
 
     wb = openpyxl.load_workbook(output_file, data_only=True)
     ws = wb.active
@@ -623,7 +664,9 @@ def 상세리포트(output_file, 사유목록):
 
     이슈_by_row = {}
     for 엑셀행, 상품, 사유 in 사유목록:                  # 수동확인(빨강) 행
-        if '상품명' in str(사유):
+        if '수량' in str(사유):
+            종류, 문제, 해결 = '수량이상', 문제_수량이상, 해결_수량이상
+        elif '상품명' in str(사유):
             종류, 문제, 해결 = '상품명없음', 문제_상품명없음, 해결_상품명없음
         else:
             종류, 문제, 해결 = '배송비없음', 문제_배송비없음, 해결_배송비없음

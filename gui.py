@@ -17,7 +17,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "2.8"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "2.9"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -572,19 +572,29 @@ class ConverterApp:
         self.log("발주서 분리를 시작합니다... (발화주명: %s)" % (발화 or "(빈칸)"))
         threading.Thread(target=self._split_worker, args=(발화,), daemon=True).start()
 
+    def _form_dirs(self):
+        """출력양식 후보 폴더(앞쪽 우선): exe 옆 → 상위 폴더 → exe 번들(_MEIPASS)."""
+        dirs = [os.path.join(app_dir(), "출력양식"),
+                os.path.join(os.path.dirname(app_dir()), "출력양식")]
+        base = getattr(sys, "_MEIPASS", None)      # 번들된 출력양식(파일 누락 시 보충)
+        if base:
+            dirs.append(os.path.join(base, "출력양식"))
+        return dirs
+
     def _split_worker(self, 발화):
         try:
-            양식폴더 = os.path.join(app_dir(), "출력양식")
-            if not os.path.isdir(양식폴더):     # exe가 dist면 상위 폴더의 출력양식
-                양식폴더 = os.path.join(os.path.dirname(app_dir()), "출력양식")
             out_dir = os.path.join(app_dir(), "분리출력")
-            res = engine.발주서분리(self.conv_file, 발화, 양식폴더, out_dir, log=self.log)
+            res = engine.발주서분리(self.conv_file, 발화, self._form_dirs(),
+                                    out_dir, log=self.log)
             self.split_dir = out_dir
             self.log("─" * 38)
             for 택배사, n, p in res:
                 self.log("  %s : %d건 → %s" % (택배사, n, os.path.basename(p)))
             self.log("✅ 분리 완료: " + out_dir)
             self.root.after(0, lambda: self.btn_split_open.config(state="normal"))
+        except engine.양식파일없음 as ex:          # 양식 없음 → 친절한 안내(트레이스백 없이)
+            self.log("─" * 38)
+            self.log("⚠️ " + str(ex))
         except Exception as ex:
             self.log("─" * 38)
             self.log("❌ 분리 오류: " + str(ex))

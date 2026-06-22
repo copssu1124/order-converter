@@ -906,10 +906,36 @@ def _fill_rebuild(tpl, cfg, 행들, 발화주명, outp):
     owb.save(outp)
 
 
+class 양식파일없음(Exception):
+    """택배사 양식 파일을 어느 후보 폴더에서도 못 찾았을 때(친절한 안내용)."""
+    pass
+
+
+def _양식폴더목록(양식폴더):
+    """단일 경로 또는 목록 → 실제 존재하는 폴더만 추린 목록(앞쪽 우선)."""
+    cands = 양식폴더 if isinstance(양식폴더, (list, tuple)) else [양식폴더]
+    out = []
+    for d in cands:
+        if d and os.path.isdir(d) and d not in out:
+            out.append(d)
+    return out
+
+
+def _양식파일찾기(폴더목록, filename):
+    """여러 후보 폴더에서 파일을 순서대로 탐색(외부 폴더 우선, 없으면 exe 번들)."""
+    for d in 폴더목록:
+        p = os.path.join(d, filename)
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def 발주서분리(converted_file, 발화주명, 양식폴더, out_dir, log=print):
     """변환완료 파일을 택배사별로 나눠 각 양식에 채워 개별 파일로 저장.
+       양식폴더: 단일 경로 또는 후보 경로 목록(앞쪽 우선; 외부 폴더 → exe 번들 순으로 파일 탐색).
        반환: [(택배사, 건수, 저장경로), ...]"""
     os.makedirs(out_dir, exist_ok=True)
+    폴더목록 = _양식폴더목록(양식폴더)
     wb = openpyxl.load_workbook(converted_file, data_only=True)
     ws = wb.active
 
@@ -928,6 +954,24 @@ def 발주서분리(converted_file, 발화주명, 양식폴더, out_dir, log=pri
         그룹.setdefault(_route(carrier), []).append(d)
     wb.close()
 
+    # 주문에 나온 택배사의 양식이 어디(외부폴더/번들)에도 없으면 → 친절한 안내로 중단
+    누락 = []
+    for key in 그룹:
+        if key == '기타':
+            continue
+        fn = FORM_MAP[key]['file']
+        if _양식파일찾기(폴더목록, fn) is None and (key, fn) not in 누락:
+            누락.append((key, fn))
+    if 누락:
+        빠진것 = '\n'.join('   · %s  (택배사: %s)' % (fn, k) for k, fn in 누락)
+        찾은곳 = '\n'.join('   - ' + d for d in 폴더목록) or '   - (출력양식 폴더를 못 찾음)'
+        raise 양식파일없음(
+            "출력양식 파일을 찾지 못했어요.\n\n"
+            "[빠진 양식]\n%s\n\n"
+            "[찾아본 위치]\n%s\n\n"
+            "→ 프로그램(exe)과 같은 폴더에 '출력양식' 폴더를 만들고,\n"
+            "   그 안에 위 양식 파일을 '이름 그대로' 넣어주세요." % (빠진것, 찾은곳))
+
     stamp = datetime.datetime.now().strftime('%m%d_%H%M%S')   # 시각까지 → 덮어쓰기 방지
     결과 = []
     for key, 행들 in 그룹.items():
@@ -944,7 +988,7 @@ def 발주서분리(converted_file, 발화주명, 양식폴더, out_dir, log=pri
             continue
 
         cfg = FORM_MAP[key]
-        tpl = os.path.join(양식폴더, cfg['file'])
+        tpl = _양식파일찾기(폴더목록, cfg['file'])   # 외부폴더 우선 → 없으면 번들
         if cfg.get('kind') == 'xlsx':
             _fill_inplace(tpl, cfg, 행들, 발화주명, outp)
         else:

@@ -216,7 +216,7 @@ def 택배비조회(상품키):
         조합 = 판매비표[수정키]
         조합_norm = 정규화(조합)
         if 조합_norm in 수정택배비표:
-            return {'경로': '수정', 'carrier': '천일', '값': 조합,
+            return {'경로': '수정', 'carrier': '수정', '값': 조합,
                     '수정가격': int(수정택배비표[조합_norm]),
                     '씨제이등급': None, '로젠등급': None, '대신택배등급': None,
                     '박스등급': 박스번호목록(조합), '천일박스': None,
@@ -493,13 +493,13 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
                 택배사_disp = '수동확인' if is_수동확인 else carrier
                 택배비표시 = (str(fee) if fee is not None
                               else (carrier if carrier and carrier != '?' else ''))
-            elif 경로 == '수정':                       # 수정택배비 고정가 사용 (택배등급=라벤더 표시)
+            elif 경로 == '수정':                       # 수정택배비 고정가 사용 (택배사='수정', 택배등급=라벤더)
                 is_수동확인 = False
-                택배사_disp = carrier                   # '천일'
+                택배사_disp = carrier                   # '수정'
                 배송비합계 = 조회['수정가격']
                 fee = 배송비합계
                 택배비표시 = str(fee)
-                택배등급 = 박스등급
+                택배등급 = 조회['값']                    # 수정택배비 탭의 실제 조합값(예: 스티로폴박스4/16스티로폴박스2/8)
                 is_수정택배비 = True
             elif 경로 == '천일':                       # 일반 없거나 깨짐 → 천일 박스로 합계
                 is_수동확인 = False
@@ -600,7 +600,9 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
     for i, r in enumerate(결과목록):
         excel_row = i + 2
         빔 = r['fee'] is None
-        if r['택배사'] == '다모아':
+        if r.get('is_수정택배비'):                # 수정택배비 행 → 택배사 칸도 라벤더(놓치지 않게)
+            L_fill = 수정_FILL
+        elif r['택배사'] == '다모아':
             L_fill = DAMOA_FILL
         elif r['택배사'] == '수동확인':
             L_fill = MANUAL_FILL
@@ -947,6 +949,8 @@ def _route(carrier):
         return '대신택배'
     if '대신' in cs:              # 대신·대신낱개 → 한 파일
         return '대신'
+    if '수정' in cs:              # 수정택배비 행 → 천일 박스 발송이므로 천일 양식
+        return '천일'
     if cs in FORM_MAP:
         return cs
     return '기타'

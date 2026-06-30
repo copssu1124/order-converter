@@ -17,7 +17,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "3.1"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "3.2"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -93,8 +93,8 @@ GUIDE = (
     "  · 노랑 = 빈칸(확인 필요)\n"
     "[배송비합계(R)열]\n"
     "  · 연빨강 = 합계 / 진빨강 = 단가×수량 곱셈한 합계\n"
-    "[택배등급(S)열]\n"
-    "  · 연보라 = 수정택배비 사용(검토 필요)\n"
+    "[택배사(L)·택배등급(S)열]\n"
+    "  · 연보라 = 수정택배비 사용(택배사 '수정' · 검토 필요)\n"
     "[주소]\n"
     "  · 연한 빨강 = 주소 중복(같은 주소 2건 이상)\n\n"
     "📋 결과 '비고'열\n"
@@ -578,6 +578,7 @@ class ConverterApp:
             'start "" "%s"' % target_exe,
             "goto cleanup",
             ":launch",
+            "ping -n 9 127.0.0.1 >nul",                          # 교체 직후 ~8초 대기(백신 검사 완료) → 첫 실행 DLL오류 완화
             'start "" "%s"' % target_exe,                        # 새 버전 실행
             "set /a m=0",
             ":check",                                            # 새 버전 기동 확인(최대 ~10초)

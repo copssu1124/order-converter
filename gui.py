@@ -17,7 +17,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "3.0"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "3.1"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -92,7 +92,9 @@ GUIDE = (
     "  · 초록 = 배송비 있음\n"
     "  · 노랑 = 빈칸(확인 필요)\n"
     "[배송비합계(R)열]\n"
-    "  · 빨강계열 = 합계 (진할수록 묶음 2개↑)\n"
+    "  · 연빨강 = 합계 / 진빨강 = 단가×수량 곱셈한 합계\n"
+    "[택배등급(S)열]\n"
+    "  · 연보라 = 수정택배비 사용(검토 필요)\n"
     "[주소]\n"
     "  · 연한 빨강 = 주소 중복(같은 주소 2건 이상)\n\n"
     "📋 결과 '비고'열\n"

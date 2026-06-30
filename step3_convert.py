@@ -25,6 +25,7 @@ from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 씨제이택배비표 = {}
 로젠택배비표 = {}
 대신택배표 = {}
+수정택배비표 = {}      # 수정택배비 시트: 박스조합 문자열 → 고정 택배비
 
 # 매핑표 파일 자동 탐색용 패턴 (이름에 '상품명'과 '변경' 포함된 .xlsx)
 MAPPING_GLOBS = ["*상품명*택배사*변경*.xlsx", "*상품명*변경*.xlsx", "★*.xlsx"]
@@ -132,6 +133,21 @@ def parse_result(v):
     return fee, carrier
 
 
+def _비박스_천일품목(박스값):
+    """천일택배비 시트의 '스티로폴박스' 외 품목(아이스팩 등)을 박스값에서 인식.
+       반환: ([(품목명, 가격, 1)], False) 또는 ([], False)(없음)."""
+    키 = 정규화(str(박스값))
+    for 품목_norm, 가격 in 천일택배비표.items():
+        if '스티로폴박스' in 품목_norm:
+            continue
+        if 품목_norm and 품목_norm in 키:
+            try:
+                return [(품목_norm, int(가격), 1)], False
+            except (ValueError, TypeError):
+                return [], False
+    return [], False
+
+
 def 천일박스파싱(박스값):
     """천일 매핑값 -> (박스리스트, is_total)
        박스리스트: [(박스명, 박스가격int, 박스개수), ...] / None(가격조회실패) / [](박스없음)
@@ -144,9 +160,10 @@ def 천일박스파싱(박스값):
       '스티로폴박스A(YEA)/스티로폴박스B(WEA)' -> 박스A ×1 + 박스B ×1 (이중박스, is_total=True)
       변종: '수량1'(하이픈 없음), '수량*M', 끝의 '*' 등도 흡수
     """
-    박스번호들 = re.findall(r'스티로폴박스(\d)', 박스값)
+    박스값 = str(박스값)
+    박스번호들 = re.findall(r'스티로폴박스(\d+)', 박스값)   # 다자리(11·12·123…) 인식
     if not 박스번호들:
-        return [], False  # 박스 정보 없음 → 수동확인 대상
+        return _비박스_천일품목(박스값)   # 아이스팩 등 천일택배비 시트의 비박스 품목 인식
 
     def 가격(N):
         v = 천일택배비표.get(정규화(f'스티로폴박스{N}'))
@@ -177,7 +194,7 @@ def 천일박스파싱(박스값):
 def 박스번호목록(박스값):
     """천일 값에서 '스티로폴박스N' 번호만 추출 (개수 제거, 중복제거, 순서유지)."""
     nums = []
-    for d in re.findall(r'스티로폴박스(\d)', str(박스값)):
+    for d in re.findall(r'스티로폴박스(\d+)', str(박스값)):
         name = '스티로폴박스' + d
         if name not in nums:
             nums.append(name)
@@ -191,6 +208,19 @@ def 택배비조회(상품키):
     일반키 = 정규화(상품키)
     천일키 = 정규화(상품키 + '천일')
     박스등급 = 박스번호목록(판매비표[천일키]) if 천일키 in 판매비표 else ''
+
+    # 0순위: '수정택배비' — 판매비변경 '…수정' 키가 있으면 수정택배비 시트의 고정가 사용
+    #         (없거나 시트에 조합이 없으면 아래 일반/천일 로직으로 안전하게 폴백)
+    수정키 = 정규화(상품키 + '수정')
+    if 수정키 in 판매비표:
+        조합 = 판매비표[수정키]
+        조합_norm = 정규화(조합)
+        if 조합_norm in 수정택배비표:
+            return {'경로': '수정', 'carrier': '천일', '값': 조합,
+                    '수정가격': int(수정택배비표[조합_norm]),
+                    '씨제이등급': None, '로젠등급': None, '대신택배등급': None,
+                    '박스등급': 박스번호목록(조합), '천일박스': None,
+                    '비고': f'[수정] {조합}'}
 
     일반_순수금액 = False
     if 일반키 in 판매비표:                       # 1순위: 일반 키 (형식 정상일 때만)
@@ -248,7 +278,7 @@ def make_output_path(input_file):
 
 def _load_mapping(mapping_file, log):
     """매핑표 4개 시트를 읽어 전역 사전 채움 (읽기 전용)."""
-    global 매핑표, 판매비표, 천일택배비표, 씨제이택배비표, 로젠택배비표, 대신택배표
+    global 매핑표, 판매비표, 천일택배비표, 씨제이택배비표, 로젠택배비표, 대신택배표, 수정택배비표
     매핑원본 = pd.read_excel(mapping_file, sheet_name="상품명변경", header=None)
     판매비원본 = pd.read_excel(mapping_file, sheet_name="판매비변경", header=None)
     천일택배비원본 = pd.read_excel(mapping_file, sheet_name="천일택배비", header=None)
@@ -261,6 +291,10 @@ def _load_mapping(mapping_file, log):
         대신택배원본 = pd.read_excel(mapping_file, sheet_name="대신택배", header=None)
     except Exception:
         대신택배원본 = None
+    try:
+        수정택배비원본 = pd.read_excel(mapping_file, sheet_name="수정택배비", header=None)
+    except Exception:
+        수정택배비원본 = None
 
     매핑표 = {}
     for i in range(3, len(매핑원본)):
@@ -309,6 +343,17 @@ def _load_mapping(mapping_file, log):
                 except (ValueError, TypeError):
                     키 = str(등급).strip().upper()
                 대신택배표[키] = str(int(금액))
+
+    수정택배비표 = {}                        # 수정택배비: 박스조합 문자열 → 고정 택배비
+    if 수정택배비원본 is not None:
+        for i in range(len(수정택배비원본)):
+            조합 = 수정택배비원본.iloc[i, 0]
+            금액 = 수정택배비원본.iloc[i, 1]
+            if pd.notna(조합) and pd.notna(금액):
+                try:
+                    수정택배비표[정규화(str(조합))] = str(int(금액))
+                except (ValueError, TypeError):
+                    pass
 
     log(f"매핑표 로드: 상품명 {len(매핑표)}건 / 판매비 {len(판매비표)}건")
 
@@ -392,6 +437,7 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
         fee = None
         배송비합계 = None
         택배등급 = ''
+        is_수정택배비 = False
         if 방식 == "매핑실패":
             택배사_disp = '수동확인'
             is_수동확인 = True
@@ -447,6 +493,14 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
                 택배사_disp = '수동확인' if is_수동확인 else carrier
                 택배비표시 = (str(fee) if fee is not None
                               else (carrier if carrier and carrier != '?' else ''))
+            elif 경로 == '수정':                       # 수정택배비 고정가 사용 (택배등급=라벤더 표시)
+                is_수동확인 = False
+                택배사_disp = carrier                   # '천일'
+                배송비합계 = 조회['수정가격']
+                fee = 배송비합계
+                택배비표시 = str(fee)
+                택배등급 = 박스등급
+                is_수정택배비 = True
             elif 경로 == '천일':                       # 일반 없거나 깨짐 → 천일 박스로 합계
                 is_수동확인 = False
                 택배사_disp = carrier                   # '천일' 또는 '대신'(일반 순수금액 폴백)
@@ -471,12 +525,14 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
             fee = None
             배송비합계 = None
             택배비표시 = '수동확인'
+            is_수정택배비 = False
 
         결과목록.append({
             '행': idx, '상품결과': 상품결과, '회사상품명': 회사상품명,
             '택배사': 택배사_disp, '택배비': 택배비표시, 'fee': fee,
             '수량': 수량, '묶음수량': 묶음수량, '배송비합계': 배송비합계,
             '택배등급': 택배등급, '비고': 비고, 'is_수동확인': is_수동확인,
+            'is_수정택배비': is_수정택배비,
         })
 
     if not 결과목록:
@@ -522,10 +578,12 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
     SUBTOTAL_BASE  = _fill('FFCCCC')
     SUBTOTAL_MULTI = _fill('FF9999')
     YELLOW         = _fill('FFFF00')
+    수정_FILL      = _fill('E6CCF5')      # 연보라(라벤더) — 수정택배비 사용 행 강조
 
     EXCEL_COL_택배사 = 12
     EXCEL_COL_배송비 = 17
     EXCEL_COL_합계  = 18
+    EXCEL_COL_등급  = 19
     LAST_COL = len(출력df.columns)
 
     wb = openpyxl.load_workbook(output_path)
@@ -556,10 +614,12 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
         합계_cell.font = Font(bold=True)
         if 빔:
             합계_cell.fill = YELLOW
-        elif r['묶음수량'] >= 2:
+        elif r['fee'] != r['배송비합계']:   # 진빨강 = 단가×수량 곱셈이 실제 일어난 행(단가≠합계)만
             합계_cell.fill = SUBTOTAL_MULTI
         else:
-            합계_cell.fill = SUBTOTAL_BASE
+            합계_cell.fill = SUBTOTAL_BASE  # 단가==합계(정액·수정택배비 등) → 연빨강
+        if r.get('is_수정택배비'):       # 수정택배비 사용 행 → 택배등급 칸 라벤더(검토용)
+            ws.cell(row=excel_row, column=EXCEL_COL_등급).fill = 수정_FILL
 
     # 주소 중복 표시 — 주소가 완전히 동일한 줄이 2개 이상이면 그 주소 셀을 빨강
     ADDR_FILL = _fill('FFC7CE')      # 연한 빨강(중복 강조, 글자 보임)

@@ -17,7 +17,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "3.2"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "3.3"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -137,9 +137,13 @@ GUIDE2 = (
     "· 대신택배 → 대신택배(별도 파일)\n"
     "· 로젠 → 로젠 양식\n"
     "· 천일 → 천일 양식\n"
-    "· 원준 → 원준 양식\n"
-    "· 위플 → 위플 양식\n"
-    "· 양식 없음 → '기타' 파일로 모음\n\n"
+    "· 원준 → 원준 양식 (L열 총운임)\n"
+    "· 위플 → 위플 양식 (F열 총운임)\n"
+    "· 로젠 → 로젠 양식 (G열 총운임)\n"
+    "· 올담 → 올담 양식\n"
+    "· 카몬드 → 카몬드 양식\n"
+    "· 양식 없음 → '기타' 파일로 모음\n"
+    "· 대신 파일: 연두칸 = 대신낱개 행\n\n"
     "⚠ '출력양식' 폴더가 프로그램과\n"
     "   같은(또는 상위) 폴더에 있어야 합니다.\n"
 )

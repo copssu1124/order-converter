@@ -469,6 +469,9 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
 
     # 1) 파일 로드
     주문서 = pd.read_excel(input_file)
+    if any(str(c) == '배송비합계' for c in 주문서.columns):   # 변환 결과물 재투입 방지
+        raise RuntimeError("이미 변환된 결과 파일이에요. ① 탭에는 원본 주문서(.xls)를 넣어주세요. "
+                           "(검증한 결과로 발주서를 만들려면 ② 택배사 분리 탭)")
     try:
         _load_mapping(mapping_file, log)
     except Exception as e:

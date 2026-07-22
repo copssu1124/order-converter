@@ -109,8 +109,8 @@ def 변환시도(키, 수량):
         if k and k != 키_norm and k not in 후보들:
             후보들.append(k)
 
-    _추가(re.sub(r'/\s*\d[\d,]*\s*원\s*/\s*\d+\s*개', '', 키_norm))    # /가격원/N개
-    _추가(re.sub(r'\(\s*\+\s*\d[\d,]*\s*원\s*\)\s*$', '', 키_norm))    # (+금액원)
+    _추가(re.sub(r'/\s*-?\d[\d,]*\s*원\s*/\s*\d+\s*개', '', 키_norm))  # /가격원/N개 (할인 음수 포함)
+    _추가(re.sub(r'\(\s*[+-]\s*\d[\d,]*\s*원\s*\)\s*$', '', 키_norm))  # (+금액원)/(-금액원)
     for base in [키_norm] + list(후보들):
         _추가(re.sub(r'-\d+개\s*$', '', base))                         # -N개
         _추가(re.sub(r'/\d+개\s*$', '', base))                         # /N개
@@ -212,12 +212,20 @@ def 천일박스파싱(박스값):
 
 
 def 박스번호목록(박스값):
-    """천일 값에서 '스티로폴박스N' 번호만 추출 (개수 제거, 중복제거, 순서유지)."""
+    """천일 값에서 표시용 품목 추출: '스티로폴박스N'(개수 제거, 중복제거, 순서유지)
+       + 천일택배비 시트의 비박스 품목(아이스팩 등)도 값에 포함되어 있으면 함께 표시."""
+    s = str(박스값)
     nums = []
-    for d in re.findall(r'스티로폴박스(\d+)', str(박스값)):
+    for d in re.findall(r'스티로폴박스(\d+)', s):
         name = '스티로폴박스' + d
         if name not in nums:
             nums.append(name)
+    s_norm = 정규화(s)
+    for 품목 in 천일택배비표:              # 비박스 품목(아이스팩 등) → S열에 단어 표시
+        if '스티로폴박스' in 품목:
+            continue
+        if 품목 and 품목 in s_norm and 품목 not in nums:
+            nums.append(품목)
     return ' '.join(nums)
 
 

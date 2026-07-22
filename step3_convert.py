@@ -545,7 +545,9 @@ def convert(input_file, mapping_file, output_path=None, log=print, verbose=False
                 elif 기타등급 and 기타등급 in 기타등급표.get(carrier, {}):
                     # 신규 등급 택배사(위플 P/원준 T/카몬드 K/올담 AD/용차 J) — 씨제이와 동일 방식
                     단가 = int(기타등급표[carrier][기타등급])
-                    배송비합계 = 단가 * 묶음수량
+                    # 위플·올담: 개당 요금 → (Nea) 표시 없어도 항상 수량 곱셈
+                    #   (위플은 매칭표 전 상품 무표시 0/196, 올담은 사용자 확인으로 위플과 동일 정책)
+                    배송비합계 = 단가 * (수량 if carrier in ('위플', '올담') else 묶음수량)
                     fee = 단가
                 elif carrier in ('씨제이', '로젠', '대신택배') or 기타등급표.get(carrier):
                     # 등급 택배사인데 등급이 가격표에 없음 → 값('5*대신택배')의 선두 숫자를
@@ -990,7 +992,9 @@ FORM_MAP = {
     '천일': {'file': '천일택배 양식.xlsx', 'sheet': 'Sheet1', 'kind': 'xlsx',
              'header_row': 1, 'data_row': 2,
              'fields': {1: 'recv', 2: 'phone', 3: 'phone', 4: 'addr',
-                        5: 'grade', 6: 'prod', 7: 'qty', 10: 'memo'}},
+                        5: 'grade', 6: 'prod', 7: 'qty', 10: 'memo',
+                        11: 'total'},             # 11(K):총운임 — 양식엔 없는 열이라 헤더도 추가
+             'extra_headers': {11: '총운임'}},
     #          10:배송메세지=배송메모
     '대신': _대신양식,            # 대신 + 대신낱개 (한 파일)
     '대신택배': {'file': '대신택배.xlsx', 'sheet': '출하내역', 'kind': 'xlsx',
@@ -1001,7 +1005,8 @@ FORM_MAP = {
     '씨제이': {'file': 'CJ 제이제이 입력양식.xlsx', 'sheet': 'Sheet1', 'kind': 'xlsx',
                'header_row': 1, 'data_row': 2,
                'fields': {1: 'cjgrade', 3: 'prod', 5: 'qty', 7: 'recv', 8: 'zip',
-                          9: 'phone', 10: 'phone', 12: 'addr', 13: 'memo'}},
+                          9: 'phone', 10: 'phone', 12: 'addr', 13: 'memo',
+                          18: 'total'}},          # 18(R):운임 — 양식에 헤더 이미 있음
     # 1:박스타입=택배등급(S~E만), 13:요구사항=배송메세지
     '원준': {'file': '원준 발주양식.xls', 'sheet': '발주내역', 'kind': 'xls',
              'fields': {3: 'recv', 4: 'addr', 5: 'phone', 7: 'qty', 10: 'prod',
@@ -1046,6 +1051,8 @@ def _fill_inplace(tpl, cfg, 행들, 발화주명, outp):
     ws = wb[cfg['sheet']]
     hr, dr = cfg.get('header_row', 1), cfg.get('data_row', 2)
     no_col, balhwa_col = cfg.get('no_col'), cfg.get('balhwa_col')
+    for col, txt in (cfg.get('extra_headers') or {}).items():
+        ws.cell(row=hr, column=col, value=txt)   # 양식에 없는 열의 헤더(천일 K:총운임 등)
     ncol = 1                                     # 헤더행 마지막 비지 않은 열까지
     for c in range(1, min(ws.max_column, 80) + 1):
         if ws.cell(row=hr, column=c).value is not None:

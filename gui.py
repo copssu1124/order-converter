@@ -19,7 +19,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "4.0"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "4.1"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -770,6 +770,13 @@ class ConverterApp:
             r.pack(fill="x", pady=(0, 6))
             tk.Label(r, text="📦 %s" % 택배사, bg=FBG, fg=INK, font=self.F(10), anchor="w").pack(side="left", padx=13, pady=9)
             tk.Label(r, text="%d건" % n, bg=FBG, fg=INK2, font=self.F(10, True)).pack(side="right", padx=13)
+        # 총 합계 (전체 건수)
+        총건수 = sum(n for _, n, _ in res)
+        tk.Frame(self.carrier_wrap, bg=LINE, height=1).pack(fill="x", pady=(6, 0))
+        tot = tk.Frame(self.carrier_wrap, bg=BG)
+        tot.pack(fill="x", pady=(9, 2))
+        tk.Label(tot, text="총 합계", bg=BG, fg=INK, font=self.F(12, True)).pack(side="left", padx=6)
+        tk.Label(tot, text="%d건" % 총건수, bg=BG, fg=AC, font=self.F(16, True)).pack(side="right", padx=6)
         self.split_result.pack(fill="x")
 
     def open_split_folder(self):

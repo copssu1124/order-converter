@@ -19,7 +19,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "4.1"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "4.2"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -44,10 +44,12 @@ WARNBG  = "#fdf3e3"
 ERRC    = "#c0392b"
 DISBG   = "#dfe4e9"
 DISFG   = "#9aa2ab"
-BADGE_BG = "#d6efe1"    # 단계 미완료 배지 — 옅은 초록(죽은 회색 대신)
-BADGE_FG = "#2ba46b"
-BTN_DIS  = "#a9dcc2"    # 비활성 초록 버튼 — 옅은 초록
+BADGE_BG = "#cdecdd"    # 단계 미완료 배지 — 옅은 초록(죽은 회색 대신)
+BADGE_FG = "#1f955f"
+BTN_DIS  = "#9fd7bd"    # 비활성 초록 버튼 — 옅은 초록
 BTN_DISF = "#ffffff"
+SUB     = "#454e5a"    # 읽기 쉬운 진회색(보조 텍스트) — 40대 가독성 ↑
+PLACE   = "#6d7783"    # 플레이스홀더(연회색보다 진하게)
 
 _CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
 
@@ -152,7 +154,7 @@ class RoundBtn(tk.Canvas):
             return
         fill, fg = self._colors()
         _round_rect(self, 1, 1, w - 1, h - 1, self.radius, fill=fill,
-                    outline=("" if self.kind in ("primary", "danger") else "#d3dae1"),
+                    outline=("" if self.kind in ("primary", "danger") else "#c2ccd6"),
                     width=1)
         self.create_text(w // 2, h // 2, text=self.text, fill=fg,
                          font=self.font or ("맑은 고딕", 11, "bold"))
@@ -208,7 +210,7 @@ COLOR_LEGEND = [
 class NumBadge(tk.Canvas):
     """단계 번호 배지. set_done(True)면 초록, 아니면 회색."""
     def __init__(self, parent, num, fonts, bg=BG):
-        super().__init__(parent, width=30, height=30, bg=bg, highlightthickness=0, bd=0)
+        super().__init__(parent, width=34, height=34, bg=bg, highlightthickness=0, bd=0)
         self.num = num
         self.fonts = fonts
         self._done = False
@@ -221,13 +223,13 @@ class NumBadge(tk.Canvas):
     def _draw(self):
         self.delete("all")
         fill, fg = (AC, "#ffffff") if self._done else (BADGE_BG, BADGE_FG)
-        self.create_oval(2, 2, 28, 28, fill=fill, outline="")
-        self.create_text(15, 16, text=str(self.num), fill=fg, font=self.fonts["badge"])
+        self.create_oval(2, 2, 32, 32, fill=fill, outline="")
+        self.create_text(17, 18, text=str(self.num), fill=fg, font=self.fonts["badge"])
 
 
 class FileRow(tk.Canvas):
     """① 번호 배지 + 카테고리/파일명 + 오른쪽 버튼, 둥근 회색 인셋. 행 전체 클릭 가능."""
-    H = 78
+    H = 88
 
     def __init__(self, parent, num, category, fonts, command):
         super().__init__(parent, height=self.H, bg=BG, highlightthickness=0, bd=0)
@@ -240,8 +242,8 @@ class FileRow(tk.Canvas):
         self.sub = ""
         self.sub_ok = False
         self._done = False
-        self.btn = RoundBtn(self, "선택", command, kind="ghost", height=38,
-                            fontobj=fonts["btn"], radius=11, bgparent=FBG, width=74)
+        self.btn = RoundBtn(self, "선택", command, kind="ghost", height=44,
+                            fontobj=fonts["btn"], radius=12, bgparent=FBG, width=88)
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Button-1>", lambda e: self.command())
 
@@ -269,28 +271,28 @@ class FileRow(tk.Canvas):
         w, h = self.winfo_width(), self.H
         if w < 4:
             return
-        _round_rect(self, 1, 4, w - 1, h - 4, 16, fill=FBG, outline=LINE, width=1)
+        _round_rect(self, 1, 5, w - 1, h - 5, 18, fill=FBG, outline=LINE, width=1)
         cy = h // 2
-        r = 15
-        bx = 26
+        r = 18
+        bx = 30
         fill, fg = (AC, "#ffffff") if self._done else (BADGE_BG, BADGE_FG)
         self.create_oval(bx - r, cy - r, bx + r, cy + r, fill=fill, outline="")
         self.create_text(bx, cy + 1, text=str(self.num), fill=fg, font=self.fonts["badge"])
-        tx = 60
+        tx = 68
         # 윗줄: 카테고리 + (안내문구)
-        self.create_text(tx, cy - 13, text=self.category, anchor="w", fill=MUTED, font=self.fonts["cat"])
+        self.create_text(tx, cy - 15, text=self.category, anchor="w", fill=SUB, font=self.fonts["cat"])
         if self.sub:
             sx = tx + self.fonts["cat"].measure(self.category) + 10
-            self.create_text(sx, cy - 13, text=self.sub, anchor="w",
-                             fill=(OKC if self.sub_ok else MUTED), font=self.fonts["note"])
+            self.create_text(sx, cy - 15, text=self.sub, anchor="w",
+                             fill=(OKC if self.sub_ok else SUB), font=self.fonts["note"])
         # 아랫줄: 파일명 (버튼과 겹치지 않게 말줄임)
         name = self.filename or self.placeholder
         is_ph = not self.filename
-        avail = (w - 12 - 74 - 12) - tx      # 버튼(폭74)·여백 제외한 가용 폭
+        avail = (w - 14 - 88 - 14) - tx      # 버튼(폭88)·여백 제외한 가용 폭
         name = self._fit(name, self.fonts["file"], avail)
-        self.create_text(tx, cy + 8, text=name, anchor="w",
-                         fill=(MUTED if is_ph else INK), font=self.fonts["file"])
-        self.create_window(w - 12, cy, anchor="e", window=self.btn)
+        self.create_text(tx, cy + 11, text=name, anchor="w",
+                         fill=(PLACE if is_ph else INK), font=self.fonts["file"])
+        self.create_window(w - 14, cy, anchor="e", window=self.btn)
 
 
 class ConverterApp:
@@ -306,30 +308,39 @@ class ConverterApp:
 
         # 폰트
         fams = tkfont.families()
-        fam = "Pretendard" if "Pretendard" in fams else "맑은 고딕"
-        semi = "Pretendard SemiBold" if "Pretendard SemiBold" in fams else fam
+        # Pretendard OTF는 작은 크기(10~13pt)에서 윈도우 렌더가 흐릿함 → 힌팅이 뛰어난 '맑은 고딕' 사용.
+        # (맑은 고딕이 없으면 Pretendard/기본 폴백)
+        if "맑은 고딕" in fams:
+            fam = "맑은 고딕"
+        elif "Malgun Gothic" in fams:
+            fam = "Malgun Gothic"
+        elif "Pretendard" in fams:
+            fam = "Pretendard"
+        else:
+            fam = "TkDefaultFont"
+        semi = fam
         self.fam = fam
         self.F = lambda s, b=False: (fam, s, "bold") if b else (fam, s)
 
         def _fnt(size, w="normal", family=None):
             return tkfont.Font(family=family or fam, size=size, weight=w)
         if semi != fam:
-            self.rowfonts = {"badge": _fnt(11, "bold"), "cat": _fnt(9, family=semi),
-                             "file": _fnt(13, family=semi), "note": _fnt(9, family=semi),
-                             "btn": _fnt(10, family=semi)}
+            self.rowfonts = {"badge": _fnt(13, "bold"), "cat": _fnt(11, family=semi),
+                             "file": _fnt(15, family=semi), "note": _fnt(11, family=semi),
+                             "btn": _fnt(12, family=semi)}
         else:
-            self.rowfonts = {"badge": _fnt(11, "bold"), "cat": _fnt(9),
-                             "file": _fnt(12, "bold"), "note": _fnt(9, "bold"),
-                             "btn": _fnt(9, "bold")}
+            self.rowfonts = {"badge": _fnt(13, "bold"), "cat": _fnt(11),
+                             "file": _fnt(15, "bold"), "note": _fnt(11, "bold"),
+                             "btn": _fnt(12, "bold")}
 
         root.title("주문서 변환기 · JJ COMPANY   v" + VERSION)
-        W, H = 560, 880
+        W, H = 600, 920
         try:
             sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
             root.geometry("%dx%d+%d+%d" % (W, H, max(0, (sw - W) // 2), max(0, (sh - H) // 2 - 30)))
         except Exception:
             root.geometry("%dx%d" % (W, H))
-        root.minsize(520, 720)
+        root.minsize(560, 780)
         root.configure(bg=BG)
         root.rowconfigure(2, weight=1)
         root.columnconfigure(0, weight=1)
@@ -356,18 +367,18 @@ class ConverterApp:
 
         left = tk.Frame(h, bg=BG)
         left.grid(row=0, column=0, sticky="w", padx=(26, 0), pady=(20, 0))
-        tk.Label(left, text="주문서 변환기", bg=BG, fg=INK, font=self.F(15, True)).pack(side="left")
+        tk.Label(left, text="주문서 변환기", bg=BG, fg=INK, font=self.F(17, True)).pack(side="left")
 
         right = tk.Frame(h, bg=BG)
         right.grid(row=0, column=2, sticky="e", padx=(0, 24), pady=(20, 0))
-        self.verlbl = tk.Label(right, text="v%s · 확인 중…" % VERSION, bg=BG, fg=MUTED, font=self.F(9))
+        self.verlbl = tk.Label(right, text="v%s · 확인 중…" % VERSION, bg=BG, fg=SUB, font=self.F(10))
         self.verlbl.pack(side="right")
-        q = tk.Label(right, text="문의", bg=BG, fg=MUTED, font=self.F(9), cursor="hand2")
+        q = tk.Label(right, text="문의", bg=BG, fg=SUB, font=self.F(10), cursor="hand2")
         q.pack(side="right", padx=(0, 16))
         q.bind("<Button-1>", lambda e: webbrowser.open(KAKAO))
         q.bind("<Enter>", lambda e: q.config(fg=INK))
         q.bind("<Leave>", lambda e: q.config(fg=MUTED))
-        hp = tk.Label(right, text="설명서", bg=BG, fg=AC, font=self.F(9, True), cursor="hand2")
+        hp = tk.Label(right, text="설명서", bg=BG, fg=AC, font=self.F(10, True), cursor="hand2")
         hp.pack(side="right", padx=(0, 14))
         hp.bind("<Button-1>", lambda e: self.open_help())
         hp.bind("<Enter>", lambda e: hp.config(fg=AC2))
@@ -384,7 +395,7 @@ class ConverterApp:
         for key, txt in (("conv", "주문서 변환"), ("split", "택배사 분리")):
             f = tk.Frame(inner, bg=BG)
             f.pack(side="left", padx=(0, 26))
-            lb = tk.Label(f, text=txt, bg=BG, fg=MUTED, font=self.F(12), cursor="hand2")
+            lb = tk.Label(f, text=txt, bg=BG, fg="#6b7481", font=self.F(13), cursor="hand2")
             lb.pack()
             ul = tk.Frame(f, bg=BG, height=3)
             ul.pack(fill="x", pady=(8, 0))
@@ -430,9 +441,9 @@ class ConverterApp:
 
     def _build_conv(self, p):
         tk.Label(p, text="두 파일만 고르면 끝이에요", bg=BG, fg=INK,
-                 font=self.F(19, True)).pack(anchor="w", pady=(20, 2))
+                 font=self.F(22, True)).pack(anchor="w", pady=(22, 3))
         tk.Label(p, text="주문서와 매핑표를 고르고 아래 초록 버튼을 누르세요",
-                 bg=BG, fg=MUTED, font=self.F(10)).pack(anchor="w", pady=(0, 14))
+                 bg=BG, fg=SUB, font=self.F(12)).pack(anchor="w", pady=(0, 16))
 
         row_o = FileRow(p, 1, "주문서", self.rowfonts, self.pick_input)
         row_o.pack(fill="x", pady=(0, 9))
@@ -445,7 +456,7 @@ class ConverterApp:
         self._c2 = (row_m,)
 
         self.btn_conv = RoundBtn(p, "③   변환 실행", self.run_convert, kind="primary",
-                                 height=56, fontobj=self.F(15, True), bgparent=BG, radius=15)
+                                 height=62, fontobj=self.F(17, True), bgparent=BG, radius=16)
         self.btn_conv.pack(fill="x")
         self.btn_conv.set_enabled(False)
 
@@ -460,9 +471,9 @@ class ConverterApp:
             c = tk.Frame(strip, bg=BG)
             c.grid(row=0, column=i, sticky="nsew")
             strip.grid_columnconfigure(i, weight=1)
-            v = tk.Label(c, text="–", bg=BG, fg=colr, font=self.F(25, True))
+            v = tk.Label(c, text="–", bg=BG, fg=colr, font=self.F(30, True))
             v.pack()
-            tk.Label(c, text=label, bg=BG, fg=MUTED, font=self.F(9)).pack()
+            tk.Label(c, text=label, bg=BG, fg=SUB, font=self.F(11)).pack()
             self.tiles[key] = v
         self.issue_wrap = tk.Frame(self.result_box, bg=BG)
         self.issue_wrap.pack(fill="x", pady=(12, 0))
@@ -472,9 +483,9 @@ class ConverterApp:
 
     def _build_split(self, p):
         tk.Label(p, text="택배사별 발주서 만들기", bg=BG, fg=INK,
-                 font=self.F(19, True)).pack(anchor="w", pady=(20, 2))
+                 font=self.F(22, True)).pack(anchor="w", pady=(22, 3))
         tk.Label(p, text="①에서 만든 결과를 엑셀로 검증·보완한 뒤 불러오세요",
-                 bg=BG, fg=MUTED, font=self.F(10)).pack(anchor="w", pady=(0, 14))
+                 bg=BG, fg=SUB, font=self.F(12)).pack(anchor="w", pady=(0, 16))
 
         row_c = FileRow(p, 1, "변환완료 파일", self.rowfonts, self.pick_conv)
         row_c.pack(fill="x", pady=(0, 12))
@@ -488,16 +499,16 @@ class ConverterApp:
         self._s2 = (badge2,)
         mid = tk.Frame(er, bg=FBG)
         mid.pack(side="left", fill="x", expand=True, padx=(10, 14))
-        tk.Label(mid, text="발화주명  (보내는 회사)", bg=FBG, fg=MUTED,
+        tk.Label(mid, text="발화주명  (보내는 회사)", bg=FBG, fg=SUB,
                  font=self.rowfonts["cat"]).pack(anchor="w", pady=(11, 0))
-        self.entry_발화 = tk.Entry(mid, font=self.F(12), relief="flat", bg="#ffffff",
+        self.entry_발화 = tk.Entry(mid, font=self.F(14), relief="flat", bg="#ffffff",
                                    highlightthickness=1, highlightbackground="#dbe0e6",
                                    highlightcolor=AC)
         self.entry_발화.pack(fill="x", pady=(3, 11), ipady=5)
         self.entry_발화.bind("<KeyRelease>", lambda e: self._refresh_split())
 
         self.btn_split = RoundBtn(p, "③   택배사 분리 실행", self.run_split, kind="primary",
-                                  height=56, fontobj=self.F(15, True), bgparent=BG, radius=15)
+                                  height=62, fontobj=self.F(17, True), bgparent=BG, radius=16)
         self.btn_split.pack(fill="x")
         self.btn_split.set_enabled(False)
 
@@ -514,14 +525,14 @@ class ConverterApp:
         self.logcard.pack(fill="x", pady=(6, 8))
         head = tk.Frame(self.logcard, bg=CARD, cursor="hand2")
         head.pack(fill="x")
-        tk.Label(head, text="진행 상황", bg=CARD, fg="#5b636d", font=self.F(10, True)).pack(side="left", padx=14, pady=10)
+        tk.Label(head, text="진행 상황", bg=CARD, fg="#3f4855", font=self.F(11, True)).pack(side="left", padx=14, pady=11)
         self.log_arrow = tk.Label(head, text="▾", bg=CARD, fg=MUTED, font=self.F(10))
         self.log_arrow.pack(side="right", padx=14)
         self.logbody = tk.Frame(self.logcard, bg=CARD)
         from tkinter import scrolledtext
-        self.logbox = scrolledtext.ScrolledText(self.logbody, font=(self.fam, 10), height=9,
+        self.logbox = scrolledtext.ScrolledText(self.logbody, font=(self.fam, 11), height=8,
                                                  state="disabled", wrap="word", relief="flat",
-                                                 bg="#fbfdfc", fg="#42544a", padx=12, pady=6,
+                                                 bg="#fbfdfc", fg="#33424b", padx=12, pady=6,
                                                  highlightthickness=0, spacing1=1, spacing3=1)
         self.logbox.pack(fill="both", expand=True, padx=6, pady=(0, 8))
         self._log_open = True
@@ -553,7 +564,7 @@ class ConverterApp:
             pane.pack(fill="x")
         for k, (lb, ul) in self.tab_btns.items():
             on = (k == key)
-            lb.config(fg=(INK if on else MUTED), font=self.F(12, on))
+            lb.config(fg=(INK if on else "#6b7481"), font=self.F(13, on))
             ul.config(bg=(AC if on else BG))
 
     # ═══════════ 로그 ═══════════

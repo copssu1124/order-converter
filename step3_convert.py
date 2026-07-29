@@ -9,6 +9,7 @@ import unicodedata
 import openpyxl
 import xlrd
 from collections import Counter
+from copy import copy
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 
 # ============================================================
@@ -929,6 +930,47 @@ def _postprocess(output_file, log=print):
                 ws.cell(row=r, column=상품명열, value='%s*%d' % (s, q))
             except (ValueError, TypeError):
                 pass
+
+    # ── A1/A2: 주문번호·우편번호를 '텍스트'로 저장 ──
+    #   주문번호(스마트스토어)가 지수표기(2.02607E+15)로 저장되면 일괄전송 불가 → 텍스트(@)로.
+    #   우편번호는 5자리 zero-pad(05787). 헤더명으로 열을 찾아 인덱스 이동에 안전.
+    hdr = {}
+    for c in range(1, ws.max_column + 1):
+        h = ws.cell(row=1, column=c).value
+        if h is not None:
+            hdr[str(h).strip()] = c
+
+    def _텍스트열(이름, pad5=False):
+        c = hdr.get(이름)
+        if not c:
+            return
+        for r in range(2, ws.max_row + 1):
+            cell = ws.cell(row=r, column=c)
+            v = cell.value
+            if v is None or str(v).strip() == '':
+                continue
+            if isinstance(v, float) and v.is_integer():
+                s = str(int(v))                 # 2026072813972610.0 → '2026072813972610'
+            else:
+                s = str(v)
+                if s.endswith('.0') and s[:-2].isdigit():
+                    s = s[:-2]
+            if pad5 and s.isdigit():
+                s = s.zfill(5)                  # 5787 → 05787
+            cell.value = s
+            cell.number_format = '@'            # 셀서식 '텍스트' (아포스트로피 효과)
+
+    _텍스트열('우편번호', pad5=True)
+    _텍스트열('상품주문번호(스마트스토어)')
+    _텍스트열('주문번호')
+    _텍스트열('상품번호')
+
+    # ── A3: 맨 앞 'Unnamed: 0' 열 정리(헤더·값 비움) ──
+    #   열 자체는 유지(발주서분리가 열번호로 참조 → 삭제하면 어긋남). 'Unnamed: 0' 글자만 제거.
+    if str(ws.cell(row=1, column=1).value).strip() == 'Unnamed: 0':
+        for r in range(1, ws.max_row + 1):
+            ws.cell(row=r, column=1).value = None
+
     wb.save(output_file)
 
 
@@ -975,9 +1017,19 @@ def convert_v2(input_file, mapping_file, output_path, log=print):
 #   prod=상품명(이미 '회사상품명*수량'), grade=택배등급(스티로폴박스N / S~E 등)
 _SRC = {'recv': 5, 'phone': 3, 'phone2': 4, 'zip': 6, 'addr': 7,
         'prod': 9, 'qty': 11, 'carrier': 12, 'total': 18, 'grade': 19,
-        'memo': 14}
+        'memo': 14, 'option': 8, 'order': 15}
+#   option=선택사항(옵션명, 8열) / order=상품주문번호(스마트스토어, 15열)
 
 _CJ등급 = {'S', 'A', 'B', 'C', 'D', 'E'}   # 씨제이 박스타입에 들어갈 등급
+
+# 발송인(보내는분) 프로필 — GUI 드롭다운. 추후 다모아패키지·다다쇼핑 등 추가 가능.
+#   name=드롭다운에서 고른 상호(그대로 기재), phone=발송인 전화.
+#   ※ CJ(한밭물류 고정)·천일·올담은 발송인 칸이 없거나 고정이라 미적용.
+발송인프로필 = {
+    '제이제이컴퍼니': {'phone': '010-3495-8295'},
+    '아이스앤팩':     {'phone': '010-4115-4339'},
+}
+발송인기본 = '제이제이컴퍼니'
 
 # 택배사 → 양식 매핑.
 #   kind: 'xlsx'(템플릿 그대로 채움-서식보존) / 'xls'(같은 컬럼의 새 xlsx로 출력)
@@ -986,7 +1038,7 @@ _CJ등급 = {'S', 'A', 'B', 'C', 'D', 'E'}   # 씨제이 박스타입에 들어�
 _대신양식 = {'file': '대신 발주서 양식.xls', 'sheet': '대신발주서', 'kind': 'xls',
             'fields': {3: 'phone', 5: 'recv', 6: 'zip', 7: 'addr',
                        8: 'box', 10: 'qty', 13: 'total', 14: 'prod', 15: 'memo'},
-            'balhwa_col': 2,
+            'sender': {'name': 2, 'phone': 1},   # 발화주명(2)·발화주전화(1) ← 발송인 프로필
             'hl_col': 5}          # 대신낱개 행 → 수화주명(E열) 연두 표시(대신과 구분)
 #            8:품명='스티로폼박스'(번호 없이), 14:제품명=제품명*수량, 15:특기사항=배송메세지
 #   8:품명=스티로폼박스(택배등급), 14:제품명=제품명*수량, 15:특기사항=배송메세지
@@ -1001,7 +1053,8 @@ FORM_MAP = {
     #          10:배송메세지=배송메모
     '대신': _대신양식,            # 대신 + 대신낱개 (한 파일)
     '대신택배': {'file': '대신택배.xlsx', 'sheet': '출하내역', 'kind': 'xlsx',
-               'header_row': 4, 'data_row': 5, 'no_col': 1, 'balhwa_col': 7,
+               'header_row': 4, 'data_row': 5, 'no_col': 1,
+               'sender': {'name': 7},            # 보내는분(7) ← 발송인 프로필(전화칸 없음)
                'fields': {2: 'recv', 4: 'addr', 5: 'phone', 8: 'prod',
                           10: 'qty', 12: 'total', 13: 'memo'}},
     # 대신택배 전용 양식: 7:보내는분=발화주명, 8:품명=제품명*수량, 12:물품가격/운임
@@ -1012,14 +1065,18 @@ FORM_MAP = {
                           18: 'total'}},          # 18(R):운임 — 양식에 헤더 이미 있음
     # 1:박스타입=택배등급(S~E만), 13:요구사항=배송메세지
     '원준': {'file': '원준 발주양식.xls', 'sheet': '발주내역', 'kind': 'xls',
+             'sender': {'name': 1, 'phone': 2},   # 보내는상호(1)·판매자연락처(2) ← 발송인 프로필
              'fields': {3: 'recv', 4: 'addr', 5: 'phone', 7: 'qty', 10: 'prod',
                         12: 'total'},              # 12(L):총운임 — 양식엔 없는 열이라 헤더도 추가
              'extra_headers': {12: '총운임'}},
     '위플': {'file': '위플 발주서 양식.xls', 'sheet': '엑셀업로드양식', 'kind': 'xls',
-             'fields': {2: 'prod', 5: 'qty', 6: 'total', 10: 'recv', 11: 'phone',
-                        12: 'phone', 13: 'zip', 14: 'addr', 15: 'memo'}},
-    #          6(F):판매금액 칸에 총운임 / 15:배송메세지=배송메모
+             'sender': {'name': 7, 'phone': 8, 'phone2': 9},  # 신청인명(7)·전화(8)·휴대폰(9)
+             'fields': {2: 'prod', 3: 'option', 5: 'qty', 6: 'total', 10: 'recv',
+                        11: 'phone', 12: 'phone', 13: 'zip', 14: 'addr', 15: 'memo',
+                        16: 'order'}},             # 2:상품명 3:옵션 / 6:총운임 / 16:상품주문번호
+    #          15:배송메세지=배송메모
     '로젠': {'file': '로젠.xls', 'sheet': '발주발송관리', 'kind': 'xls',
+             'sender': {'name': 19, 'phone': 21},  # 보내는분 상호(19)·전화(21) ← 발송인 프로필
              'fields': {1: 'recv', 3: 'addr', 4: 'phone', 6: 'qty', 7: 'total',
                         9: 'prod', 11: 'memo'}},   # 7(G):총운임 / 11:배송메세지
     '올담': {'file': '올담 발주 양식.xls', 'sheet': '올담', 'kind': 'xls',
@@ -1028,6 +1085,7 @@ FORM_MAP = {
     #          6(F):적용품명=제품명*수량 / 현불·택배 등 고정값은 기본행 복사
     '카몬드': {'file': '카몬드 발주양식.xlsx', 'sheet': 'Sheet1', 'kind': 'xlsx',
                'header_row': 1, 'data_row': 2,
+               'sender': {'name': 10, 'phone': 11},  # 보내는분(10)·전화(11) ← 발송인 프로필
                'fields': {2: 'recv', 3: 'phone', 4: 'phone', 5: 'addr',
                           6: 'prod', 7: 'qty', 12: 'memo', 15: 'zip'}},
     #          6(F):품목명 / 12(L):특기사항 / 15(O):우편번호 / 보내는분 정보는 기본행 복사
@@ -1053,7 +1111,9 @@ def _fill_inplace(tpl, cfg, 행들, 발화주명, outp):
     wb = openpyxl.load_workbook(tpl)
     ws = wb[cfg['sheet']]
     hr, dr = cfg.get('header_row', 1), cfg.get('data_row', 2)
-    no_col, balhwa_col = cfg.get('no_col'), cfg.get('balhwa_col')
+    no_col = cfg.get('no_col')
+    snd = cfg.get('sender')
+    prof = 발송인프로필.get(발화주명, {})
     for col, txt in (cfg.get('extra_headers') or {}).items():
         ws.cell(row=hr, column=col, value=txt)   # 양식에 없는 열의 헤더(천일 K:총운임 등)
     ncol = 1                                     # 헤더행 마지막 비지 않은 열까지
@@ -1061,16 +1121,26 @@ def _fill_inplace(tpl, cfg, 행들, 발화주명, outp):
         if ws.cell(row=hr, column=c).value is not None:
             ncol = c
     기본행 = {c: ws.cell(row=dr, column=c).value for c in range(1, ncol + 1)}
+    기본스타일 = {c: copy(ws.cell(row=dr, column=c)._style) for c in range(1, ncol + 1)}
     for i, d in enumerate(행들):
         rr = dr + i
-        for c in range(1, ncol + 1):            # 기본행(고정값) 복사 (NO.열 제외)
+        for c in range(1, ncol + 1):            # 기본행(고정값·서식) 복사 (NO.열 제외)
+            cell = ws.cell(row=rr, column=c)
+            try:                                # 서식 복사 → 정렬·테두리 일관(CJ 17행↓ 이슈)
+                cell._style = copy(기본스타일[c])
+            except Exception:
+                pass
             bv = 기본행.get(c)
             if bv is not None and c != no_col:
-                ws.cell(row=rr, column=c, value=bv)
+                cell.value = bv
         for col, field in cfg['fields'].items():
             ws.cell(row=rr, column=col, value=d.get(field))
-        if balhwa_col:
-            ws.cell(row=rr, column=balhwa_col, value=발화주명)
+        if snd:                                  # 발송인 프로필(이름·전화)
+            if snd.get('name'):
+                ws.cell(row=rr, column=snd['name'], value=발화주명)
+            for pk in ('phone', 'phone2'):
+                if prof.get('phone') and snd.get(pk):
+                    ws.cell(row=rr, column=snd[pk], value=prof['phone'])
         if no_col:
             ws.cell(row=rr, column=no_col, value=i + 1)
         if cfg.get('hl_col') and d.get('_hl'):   # 대신낱개 등 강조 행 → 지정 열 연두
@@ -1106,8 +1176,14 @@ def _fill_rebuild(tpl, cfg, 행들, 발화주명, outp):
             ows.cell(row=rr, column=c + 1, value=(None if pd.isna(v) else v))
         for col, field in cfg['fields'].items():
             ows.cell(row=rr, column=col, value=d.get(field))
-        if cfg.get('balhwa_col'):
-            ows.cell(row=rr, column=cfg['balhwa_col'], value=발화주명)
+        snd = cfg.get('sender')
+        if snd:                                  # 발송인 프로필(이름·전화)
+            prof = 발송인프로필.get(발화주명, {})
+            if snd.get('name'):
+                ows.cell(row=rr, column=snd['name'], value=발화주명)
+            for pk in ('phone', 'phone2'):
+                if prof.get('phone') and snd.get(pk):
+                    ows.cell(row=rr, column=snd[pk], value=prof['phone'])
         if cfg.get('hl_col') and d.get('_hl'):   # 대신낱개 등 강조 행 → 지정 열 연두
             ows.cell(row=rr, column=cfg['hl_col']).fill = _fill('92D050')
     owb.save(outp)
@@ -1157,7 +1233,7 @@ def 발주서분리(converted_file, 발화주명, 양식폴더, out_dir, log=pri
         g = d.get('grade')
         d['cjgrade'] = g if (g is not None and
                              str(g).strip().upper() in _CJ등급) else None
-        d['box'] = '스티로폼박스'      # 대신 양식 품명: 번호 없이 '스티로폼박스'로만
+        d['box'] = '스티로폼'          # 대신 양식 품명: '스티로폼'(거래처 요청, 박스 제거)
         d['_hl'] = str(carrier).strip() == '대신낱개'   # 대신 파일에서 낱개 행 연두 표시용
         그룹.setdefault(_route(carrier), []).append(d)
     wb.close()

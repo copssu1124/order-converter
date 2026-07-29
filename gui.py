@@ -14,12 +14,12 @@ import subprocess
 import webbrowser
 import urllib.request
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, ttk
 import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "4.2"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "4.3"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -499,13 +499,14 @@ class ConverterApp:
         self._s2 = (badge2,)
         mid = tk.Frame(er, bg=FBG)
         mid.pack(side="left", fill="x", expand=True, padx=(10, 14))
-        tk.Label(mid, text="발화주명  (보내는 회사)", bg=FBG, fg=SUB,
+        tk.Label(mid, text="보내는 회사 (발송인)", bg=FBG, fg=SUB,
                  font=self.rowfonts["cat"]).pack(anchor="w", pady=(11, 0))
-        self.entry_발화 = tk.Entry(mid, font=self.F(14), relief="flat", bg="#ffffff",
-                                   highlightthickness=1, highlightbackground="#dbe0e6",
-                                   highlightcolor=AC)
-        self.entry_발화.pack(fill="x", pady=(3, 11), ipady=5)
-        self.entry_발화.bind("<KeyRelease>", lambda e: self._refresh_split())
+        self.root.option_add('*TCombobox*Listbox.font', self.F(13))   # 드롭다운 목록 글씨
+        self.발송인_var = tk.StringVar(value=engine.발송인기본)
+        self.combo_발송인 = ttk.Combobox(mid, textvariable=self.발송인_var, state="readonly",
+                                        values=list(engine.발송인프로필.keys()), font=self.F(13))
+        self.combo_발송인.pack(fill="x", pady=(3, 11), ipady=3)
+        self.combo_발송인.bind("<<ComboboxSelected>>", lambda e: self._refresh_split())
 
         self.btn_split = RoundBtn(p, "③   택배사 분리 실행", self.run_split, kind="primary",
                                   height=62, fontobj=self.F(17, True), bgparent=BG, radius=16)
@@ -649,7 +650,7 @@ class ConverterApp:
     def _refresh_split(self):
         if self.conv_file:
             self._mark_done(*self._s1)
-        self._mark_done(*self._s2, done=bool(self.entry_발화.get().strip()))
+        self._mark_done(*self._s2, done=bool(self.발송인_var.get()))
         self.btn_split.set_enabled(bool(self.conv_file) and not self._busy)
 
     # ═══════════ 변환 ═══════════
@@ -743,7 +744,7 @@ class ConverterApp:
     def run_split(self):
         if self._busy or not self.conv_file:
             return
-        발화 = self.entry_발화.get().strip()
+        발화 = self.발송인_var.get()
         self._busy = True
         self.btn_split.set_enabled(False)
         self.btn_split.set_text("분리 중…")

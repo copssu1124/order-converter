@@ -19,7 +19,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "4.3"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "4.4"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -383,6 +383,11 @@ class ConverterApp:
         hp.bind("<Button-1>", lambda e: self.open_help())
         hp.bind("<Enter>", lambda e: hp.config(fg=AC2))
         hp.bind("<Leave>", lambda e: hp.config(fg=AC))
+        mn = tk.Label(right, text="📄 매뉴얼", bg=BG, fg=AC, font=self.F(10, True), cursor="hand2")
+        mn.pack(side="right", padx=(0, 14))
+        mn.bind("<Button-1>", lambda e: self.open_manual())
+        mn.bind("<Enter>", lambda e: mn.config(fg=AC2))
+        mn.bind("<Leave>", lambda e: mn.config(fg=AC))
 
     # ═══════════ 탭 (토스 언더라인) ═══════════
     def _build_tabs(self):
@@ -839,6 +844,32 @@ class ConverterApp:
             tk.Label(r, text=desc, bg=BG, fg="#4a5560", font=self.F(9),
                      wraplength=300, justify="left").pack(side="left")
         win.grab_set()
+
+    # ═══════════ 매뉴얼(PDF) 열기 ═══════════
+    def _manual_path(self):
+        """설명서 폴더(외부·번들)에서 매뉴얼 PDF 탐색."""
+        for base in (app_dir(), getattr(sys, "_MEIPASS", None)):
+            if not base:
+                continue
+            for folder in (os.path.join(base, "설명서"), base):
+                try:
+                    pdfs = [f for f in os.listdir(folder) if f.lower().endswith(".pdf")]
+                except OSError:
+                    continue
+                if pdfs:
+                    pdfs.sort(key=lambda f: (0 if "매뉴얼" in f else 1, f))
+                    return os.path.join(folder, pdfs[0])
+        return None
+
+    def open_manual(self):
+        p = self._manual_path()
+        if p and os.path.exists(p):
+            try:
+                os.startfile(p)
+            except OSError as ex:
+                self.log("매뉴얼 열기 실패: " + str(ex))
+        else:
+            self.log("⚠️ 매뉴얼 PDF를 찾지 못했어요. (프로그램 폴더의 '설명서' 폴더를 확인해 주세요)")
 
     # ═══════════ 자동 업데이트 (v3.5 로직 유지) ═══════════
     def _check_update(self):

@@ -1110,6 +1110,13 @@ def _fill_inplace(tpl, cfg, 행들, 발화주명, outp):
     """.xlsx 템플릿을 그대로 열어 서식 보존하며 데이터 행을 채운다."""
     wb = openpyxl.load_workbook(tpl)
     ws = wb[cfg['sheet']]
+    # 조건부서식 제거 — 템플릿의 특정 행대(예: CJ 주소 L17:L1048576 중복 빨강)가 채운
+    # 데이터에 걸려 '17행부터 색·모양 다름'을 유발. 발주서는 조건부서식 없이 균일하게 출력.
+    try:
+        from openpyxl.formatting.formatting import ConditionalFormattingList
+        ws.conditional_formatting = ConditionalFormattingList()
+    except Exception:
+        pass
     hr, dr = cfg.get('header_row', 1), cfg.get('data_row', 2)
     no_col = cfg.get('no_col')
     snd = cfg.get('sender')

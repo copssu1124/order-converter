@@ -19,7 +19,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "4.5"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "4.6"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"

@@ -1020,6 +1020,14 @@ _SRC = {'recv': 5, 'phone': 3, 'phone2': 4, 'zip': 6, 'addr': 7,
         'memo': 14, 'option': 8, 'order': 15}
 #   option=선택사항(옵션명, 8열) / order=상품주문번호(스마트스토어, 15열)
 
+# 발주서 분리 시 '열 이름'으로 찾아 읽는 필드 — 주문서 양식이 열 순서를 바꿔도 대응.
+#   변환결과 헤더(1행)에서 이 이름을 정확히 찾으면 그 열로, 없으면 위 _SRC 위치로 폴백.
+#   ※ 택배사·배송비합계·택배등급·상품명은 프로그램이 계산해 '고정 위치'에 써넣으므로
+#     여기서 제외(이름으로 읽으면 원본 열 값을 잘못 집을 수 있음).
+_SRC_NAMES = {'recv': '수령자', 'phone': '수령자휴대전화', 'phone2': '수령자전화번호',
+              'zip': '우편번호', 'addr': '주소', 'option': '선택사항',
+              'memo': '배송메모', 'order': '상품주문번호(스마트스토어)'}
+
 _CJ등급 = {'S', 'A', 'B', 'C', 'D', 'E'}   # 씨제이 박스타입에 들어갈 등급
 
 # 발송인(보내는분) 프로필 — GUI 드롭다운. 추후 다모아패키지·다다쇼핑 등 추가 가능.
@@ -1229,12 +1237,23 @@ def 발주서분리(converted_file, 발화주명, 양식폴더, out_dir, log=pri
     wb = openpyxl.load_workbook(converted_file, data_only=True)
     ws = wb.active
 
+    # 소스 열 해석: 이름 매칭(_SRC_NAMES) 우선 → 없으면 _SRC 고정 위치로 폴백.
+    hdrmap = {}
+    for c in range(1, ws.max_column + 1):
+        h = ws.cell(row=1, column=c).value
+        if h is not None:
+            hdrmap.setdefault(str(h).strip(), c)
+    colmap = {}
+    for k, pos in _SRC.items():
+        nm = _SRC_NAMES.get(k)
+        colmap[k] = (hdrmap.get(nm) or pos) if nm else pos
+
     그룹 = {}
     for r in range(2, ws.max_row + 1):
-        carrier = ws.cell(row=r, column=_SRC['carrier']).value
+        carrier = ws.cell(row=r, column=colmap['carrier']).value
         if carrier is None or str(carrier).strip() == '':
             continue
-        d = {k: ws.cell(row=r, column=c).value for k, c in _SRC.items()}
+        d = {k: ws.cell(row=r, column=c).value for k, c in colmap.items()}
         if not (d.get('phone') and str(d['phone']).strip()):
             d['phone'] = d.get('phone2')      # 휴대전화 없으면 일반전화로 폴백
         g = d.get('grade')

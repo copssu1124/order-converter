@@ -1308,6 +1308,91 @@ def 발주서분리(converted_file, 발화주명, 양식폴더, out_dir, log=pri
     return 결과
 
 
+# ═════════════════════════════════════════════════════════
+# 매입/매출 집계 — 변환결과 → 사이트(출고지/별칭)별 다중시트 엑셀
+#   매입: 출고지별,  총합계 = Σ배송비합계
+#   매출: 별칭(쇼핑몰계정)별, 총합계 = Σ배송비 + Σ정산예상금액
+#   레이아웃: A/B=그룹, D=상품명(정리), G=합계수량, R1=총합계, S1=라벨
+#   열은 '이름'으로 찾음(순서 무관).
+# ═════════════════════════════════════════════════════════
+def 상품명정리(v):
+    """끝의 *수량, (40ea)/(1박스·60매) 등 꼬리 제거 → 회사상품명 기준으로 통일."""
+    s = '' if pd.isna(v) else str(v)
+    s = re.sub(r'\*\s*\d+\s*$', '', s).strip()
+    s = re.sub(r'\([^)]*\)\s*$', '', s).strip()
+    return s
+
+
+def 매입매출집계(converted_file, mode, out_path, log=print):
+    """변환결과를 매입/매출로 집계해 사이트별 다중시트 엑셀 저장. 반환: (시트수, 총합계)."""
+    df = pd.read_excel(converted_file, header=0)
+    cols = {str(c).strip(): c for c in df.columns}
+
+    def col(*names):
+        for n in names:
+            if n in cols:
+                return cols[n]
+        return None
+
+    상품c, 수량c = col('상품명'), col('수량')
+    if 상품c is None or 수량c is None:
+        raise RuntimeError("변환결과에 '상품명'·'수량' 열이 없어요. ①에서 만든 결과 파일을 넣어주세요.")
+
+    if mode == '매입':
+        그룹c = col('출고지')
+        if 그룹c is None:
+            raise RuntimeError("이 파일에 '출고지' 열이 없어 매입 집계를 못 해요. (매출은 별칭으로 가능)")
+        총합열 = [col('배송비합계')]
+        라벨, 그룹칸 = '배송비합계+택배등급 토탈', 1        # A열
+    else:
+        그룹c = col('별칭(쇼핑몰계정)', '별칭')
+        if 그룹c is None:
+            raise RuntimeError("이 파일에 '별칭(쇼핑몰계정)' 열이 없어 매출 집계를 못 해요.")
+        총합열 = [col('배송비'), col('정산예상금액')]
+        라벨, 그룹칸 = '배송비+정산예정금액 토탈', 2        # B열
+
+    def num(s):
+        return pd.to_numeric(s, errors='coerce').fillna(0)
+
+    df = df.copy()
+    df['_상품'] = df[상품c].map(상품명정리)
+    df['_수량'] = num(df[수량c])
+    df['_총'] = 0
+    for c in 총합열:
+        if c is not None:
+            df['_총'] = df['_총'] + num(df[c])
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    used, 시트수, 총합계전체 = set(), 0, 0
+    for gval, gdf in df.groupby(그룹c, dropna=True):
+        agg = gdf.groupby('_상품', as_index=False)['_수량'].sum()
+        agg = agg[agg['_상품'] != ''].sort_values('_상품')
+        총 = int(round(gdf['_총'].sum()))
+        총합계전체 += 총
+        sn = re.sub(r'[\[\]\:\*\?\/\\]', ' ', str(gval)).strip()[:31] or 'Sheet'
+        base, i = sn, 2
+        while sn in used:
+            sn = f"{base[:28]}_{i}"
+            i += 1
+        used.add(sn)
+        ws = wb.create_sheet(sn)
+        for r, (_, row) in enumerate(agg.iterrows(), start=1):
+            ws.cell(row=r, column=그룹칸, value=str(gval))
+            ws.cell(row=r, column=4, value=row['_상품'])            # D
+            ws.cell(row=r, column=7, value=int(row['_수량']))       # G
+        ws.cell(row=1, column=18, value=총)                        # R1
+        ws.cell(row=1, column=19, value=라벨)                      # S1
+        ws.column_dimensions['D'].width = 34
+        시트수 += 1
+
+    if 시트수 == 0:
+        wb.create_sheet('결과없음')
+    wb.save(out_path)
+    log(f"{mode} 집계 완료: {시트수}개 시트 / 총합계 {총합계전체:,}원")
+    return 시트수, 총합계전체
+
+
 # ─────────────────────────────────────────────────────────
 # CLI 진입점 (직접 실행 시) — 폴더 자동 탐색
 # ─────────────────────────────────────────────────────────

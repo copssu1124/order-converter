@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import json
+import datetime
 import queue
 import ctypes
 import threading
@@ -19,7 +20,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "4.6"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "4.7"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -303,6 +304,8 @@ class ConverterApp:
         self.output_file = None
         self.conv_file = None
         self.split_dir = None
+        self.maemae_file = None
+        self.maemae_dir = None
         self.log_queue = queue.Queue()
         self._busy = False
 
@@ -342,11 +345,13 @@ class ConverterApp:
             root.geometry("%dx%d" % (W, H))
         root.minsize(560, 780)
         root.configure(bg=BG)
-        root.rowconfigure(2, weight=1)
+        root.rowconfigure(3, weight=1)
         root.columnconfigure(0, weight=1)
 
+        self._load_config()
         self._build_header()
         self._build_tabs()
+        self._build_folderbar()
         self._build_body()
         self._build_footer()
 
@@ -393,24 +398,20 @@ class ConverterApp:
     def _build_tabs(self):
         bar = tk.Frame(self.root, bg=BG)
         bar.grid(row=1, column=0, sticky="ew")
-        tk.Frame(bar, bg=LINE, height=1).pack(fill="x", side="bottom")
         inner = tk.Frame(bar, bg=BG)
-        inner.pack(anchor="w", padx=26, pady=(15, 0))
+        inner.pack(anchor="w", padx=24, pady=(12, 10))
         self.tab_btns = {}
-        for key, txt in (("conv", "주문서 변환"), ("split", "택배사 분리")):
-            f = tk.Frame(inner, bg=BG)
-            f.pack(side="left", padx=(0, 26))
-            lb = tk.Label(f, text=txt, bg=BG, fg="#6b7481", font=self.F(13), cursor="hand2")
-            lb.pack()
-            ul = tk.Frame(f, bg=BG, height=3)
-            ul.pack(fill="x", pady=(8, 0))
+        for key, txt in (("conv", "주문서 변환"), ("split", "택배사 분리"), ("maemae", "매입·매출")):
+            lb = tk.Label(inner, text=txt, bg="#eaeef2", fg="#5b6472", font=self.F(12, True),
+                          padx=15, pady=8, cursor="hand2")
+            lb.pack(side="left", padx=(0, 6))
             lb.bind("<Button-1>", lambda e, k=key: self.show_tab(k))
-            self.tab_btns[key] = (lb, ul)
+            self.tab_btns[key] = lb
 
     # ═══════════ 본문 ═══════════
     def _build_body(self):
         wrap = tk.Frame(self.root, bg=BG)
-        wrap.grid(row=2, column=0, sticky="nsew")
+        wrap.grid(row=3, column=0, sticky="nsew")
         wrap.rowconfigure(0, weight=1)
         wrap.columnconfigure(0, weight=1)
         cv = tk.Canvas(wrap, bg=BG, highlightthickness=0)
@@ -433,8 +434,10 @@ class ConverterApp:
         self._rows = {}
         self.pane_conv = tk.Frame(col, bg=BG)
         self.pane_split = tk.Frame(col, bg=BG)
+        self.pane_maemae = tk.Frame(col, bg=BG)
         self._build_conv(self.pane_conv)
         self._build_split(self.pane_split)
+        self._build_maemae(self.pane_maemae)
         self._build_log(col)
         self.show_tab("conv")
 
@@ -526,6 +529,29 @@ class ConverterApp:
                                        bgparent=BG, radius=12)
         self.btn_split_open.pack(fill="x", pady=(6, 4))
 
+    def _build_maemae(self, p):
+        tk.Label(p, text="매입·매출 집계", bg=BG, fg=INK,
+                 font=self.F(22, True)).pack(anchor="w", pady=(22, 3))
+        tk.Label(p, text="변환결과를 사이트별로 정리해요  (매입=출고지별 / 매출=별칭별)",
+                 bg=BG, fg=SUB, font=self.F(12)).pack(anchor="w", pady=(0, 16))
+
+        row = FileRow(p, 1, "변환결과 파일", self.rowfonts, self.pick_maemae)
+        row.pack(fill="x", pady=(0, 14))
+        self._rows["maemae"] = row
+        self._m1 = (row,)
+
+        self.btn_maemae = RoundBtn(p, "②   매입·매출 집계", self.run_maemae, kind="primary",
+                                   height=62, fontobj=self.F(17, True), bgparent=BG, radius=16)
+        self.btn_maemae.pack(fill="x")
+        self.btn_maemae.set_enabled(False)
+
+        self.maemae_result = tk.Frame(p, bg=BG)
+        self.maemae_msg = tk.Label(self.maemae_result, text="", bg=BG, fg=INK, font=self.F(12, True),
+                                   anchor="w", justify="left", wraplength=470)
+        self.maemae_msg.pack(anchor="w", pady=(16, 0))
+        self.btn_maemae_open = RoundBtn(self.maemae_result, "결과 폴더 열기", self.open_maemae_folder,
+                                        kind="ghost", height=44, fontobj=self.F(10, True), bgparent=BG, radius=12)
+
     def _build_log(self, parent):
         self.logcard = tk.Frame(parent, bg=CARD, highlightbackground=LINE, highlightthickness=1)
         self.logcard.pack(fill="x", pady=(6, 8))
@@ -557,21 +583,146 @@ class ConverterApp:
 
     def _build_footer(self):
         f = tk.Frame(self.root, bg=BG)
-        f.grid(row=3, column=0, sticky="ew")
+        f.grid(row=4, column=0, sticky="ew")
         tk.Label(f, text=CREDIT, bg=BG, fg="#9aa8a0", font=self.F(8)).pack(pady=10)
+
+    # ═══════════ 저장 폴더(필수) · 세션 폴더 ═══════════
+    def _config_path(self):
+        return os.path.join(app_dir(), "설정.json")
+
+    def _load_config(self):
+        self.config = {}
+        self._blink_job = None
+        try:
+            with open(self._config_path(), encoding="utf-8") as f:
+                self.config = json.load(f)
+        except Exception:
+            self.config = {}
+
+    def _save_config(self):
+        try:
+            with open(self._config_path(), "w", encoding="utf-8") as f:
+                json.dump(self.config, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _build_folderbar(self):
+        bar = tk.Frame(self.root, bg=FBG)
+        bar.grid(row=2, column=0, sticky="ew")
+        tk.Frame(bar, bg=LINE, height=1).pack(fill="x", side="bottom")
+        inner = tk.Frame(bar, bg=FBG)
+        inner.pack(fill="x", padx=24, pady=7)
+        self.folder_icon = tk.Label(inner, text="📁", bg=FBG, font=self.F(11))
+        self.folder_icon.pack(side="left")
+        self.folder_lbl = tk.Label(inner, text="", bg=FBG, fg=INK, font=self.F(10, True), anchor="w")
+        self.folder_lbl.pack(side="left", padx=(6, 0))
+        chg = tk.Label(inner, text="변경", bg=FBG, fg=AC, font=self.F(10, True), cursor="hand2")
+        chg.pack(side="right")
+        chg.bind("<Button-1>", lambda e: self.pick_folder())
+        self._folderbar_widgets = (inner, self.folder_icon, self.folder_lbl)
+        self._update_folderbar()
+
+    def _update_folderbar(self):
+        b = self.config.get('저장폴더')
+        if b and os.path.isdir(b):
+            self.folder_icon.config(text="📁")
+            self.folder_lbl.config(text="저장 폴더:  %s" % b, fg=INK)
+        else:
+            self.folder_icon.config(text="⚠")
+            self.folder_lbl.config(text="저장 폴더를 지정하세요 — 지정 전에는 실행할 수 없어요", fg=ERRC)
+
+    def pick_folder(self):
+        d = filedialog.askdirectory(title="저장 폴더 선택 (결과가 여기에 날짜·시간별로 정리됩니다)")
+        if not d:
+            return
+        self.config['저장폴더'] = d
+        self._save_config()
+        self._stop_blink()
+        self._update_folderbar()
+        self.log("저장 폴더 지정: " + d)
+
+    def _base_ok(self):
+        b = self.config.get('저장폴더')
+        return bool(b) and os.path.isdir(b)
+
+    def _require_folder(self):
+        if self._base_ok():
+            return True
+        self._blink_folderbar()
+        try:
+            from tkinter import messagebox
+            messagebox.showwarning("저장 폴더를 먼저 지정하세요",
+                                   "결과를 저장할 폴더를 먼저 지정해 주세요.\n\n"
+                                   "화면 위쪽의 [변경]을 눌러 폴더를 고르면,\n"
+                                   "그 폴더 안에 날짜·시간별로 자동 정리됩니다.")
+        except Exception:
+            pass
+        return False
+
+    def _blink_folderbar(self, n=8):
+        self._stop_blink()
+        seq = (WARNBG, FBG)
+
+        def step(i):
+            col = seq[i % 2]
+            for w in self._folderbar_widgets:
+                w.config(bg=col)
+            self._blink_job = self.root.after(230, lambda: step(i + 1)) if i < n else None
+
+        step(0)
+
+    def _stop_blink(self):
+        if getattr(self, "_blink_job", None):
+            try:
+                self.root.after_cancel(self._blink_job)
+            except Exception:
+                pass
+            self._blink_job = None
+        for w in getattr(self, "_folderbar_widgets", ()):
+            w.config(bg=FBG)
+
+    def _session_dir(self):
+        now = datetime.datetime.now()
+        day = now.strftime("%Y-%m-%d")
+        ampm = "오전" if now.hour < 12 else "오후"
+        return os.path.join(self.config['저장폴더'], day, "%s %s" % (ampm, now.strftime("%I시%M분")))
+
+    def _new_session_out(self, stage):
+        d = os.path.join(self._session_dir(), stage)
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def _sess_out(self, input_file, stage):
+        """입력 파일이 세션 구조(저장폴더\\날짜\\세션\\변환결과) 안이면 그 세션에, 아니면 새 세션에."""
+        base = self.config.get('저장폴더', '')
+        sess = os.path.dirname(os.path.dirname(os.path.abspath(input_file)))
+        under = False
+        try:
+            if base and os.path.commonpath([os.path.abspath(base), sess]) == os.path.abspath(base):
+                under = True
+        except Exception:
+            under = False
+        if not (under and os.path.isdir(sess)):
+            sess = self._session_dir()
+        d = os.path.join(sess, stage)
+        os.makedirs(d, exist_ok=True)
+        return d
 
     def show_tab(self, key):
         self.pane_conv.pack_forget()
         self.pane_split.pack_forget()
-        pane = self.pane_conv if key == "conv" else self.pane_split
+        self.pane_maemae.pack_forget()
+        if key == "maemae":
+            self._auto_maemae_file()
+        pane = {"conv": self.pane_conv, "split": self.pane_split,
+                "maemae": self.pane_maemae}.get(key, self.pane_conv)
         if getattr(self, "logcard", None):        # 로그 카드는 항상 아래에 유지
             pane.pack(before=self.logcard, fill="x")
         else:
             pane.pack(fill="x")
-        for k, (lb, ul) in self.tab_btns.items():
+        for k, lb in self.tab_btns.items():
             on = (k == key)
-            lb.config(fg=(INK if on else "#6b7481"), font=self.F(13, on))
-            ul.config(bg=(AC if on else BG))
+            lb.config(bg=(AC if on else "#eaeef2"), fg=("#ffffff" if on else "#5b6472"))
 
     # ═══════════ 로그 ═══════════
     def log(self, msg):
@@ -662,6 +813,8 @@ class ConverterApp:
     def run_convert(self):
         if self._busy or not self.input_file or not self.mapping_file:
             return
+        if not self._require_folder():
+            return
         self._busy = True
         self.btn_conv.set_enabled(False)
         self.btn_conv.set_text("변환 중…")
@@ -671,8 +824,7 @@ class ConverterApp:
 
     def _worker(self):
         try:
-            결과폴더 = os.path.join(app_dir(), "변환결과")
-            os.makedirs(결과폴더, exist_ok=True)
+            결과폴더 = self._new_session_out("변환결과")
             base = os.path.splitext(os.path.basename(self.input_file))[0]
             out_path = os.path.join(결과폴더, base + ".xlsx")
             out, 사유 = engine.convert_v2(self.input_file, self.mapping_file, out_path, log=self.log)
@@ -749,6 +901,8 @@ class ConverterApp:
     def run_split(self):
         if self._busy or not self.conv_file:
             return
+        if not self._require_folder():
+            return
         발화 = self.발송인_var.get()
         self._busy = True
         self.btn_split.set_enabled(False)
@@ -760,7 +914,7 @@ class ConverterApp:
 
     def _split_worker(self, 발화):
         try:
-            out_dir = os.path.join(app_dir(), "분리출력")
+            out_dir = self._sess_out(self.conv_file, "분리출력")
             res = engine.발주서분리(self.conv_file, 발화, self._form_dirs(), out_dir, log=self.log)
             self.split_dir = out_dir
             self.log("─" * 30)
@@ -800,6 +954,102 @@ class ConverterApp:
         if self.split_dir and os.path.exists(self.split_dir):
             try:
                 os.startfile(self.split_dir)
+            except OSError as ex:
+                self.log("폴더 열기 실패: " + str(ex))
+
+    # ═══════════ 매입/매출 집계 ═══════════
+    def pick_maemae(self):
+        start = os.path.join(app_dir(), "변환결과")
+        if not os.path.isdir(start):
+            start = app_dir()
+        path = filedialog.askopenfilename(title="변환결과 파일 선택", initialdir=start,
+                                          filetypes=[("엑셀", "*.xlsx *.xls"), ("모든 파일", "*.*")])
+        if not path:
+            return
+        self.maemae_file = path
+        self._set_file("maemae", os.path.basename(path), "")
+        self._mark_done(*self._m1)
+        self.log("매입/매출 대상: " + os.path.basename(path))
+        self._refresh_maemae()
+
+    def _auto_maemae_file(self):
+        """③ 탭 진입 시 최근 변환결과를 자동으로 잡아줌(방금 만든 결과 → 저장폴더 최신)."""
+        if self.maemae_file:
+            return
+        cand = None
+        if self.output_file and os.path.exists(self.output_file):
+            cand = self.output_file
+        else:
+            cand = self._latest_변환결과()
+        if cand:
+            self.maemae_file = cand
+            self._set_file("maemae", os.path.basename(cand), "자동으로 찾았어요 ✓", ok=True)
+            self._mark_done(*self._m1)
+            self._refresh_maemae()
+
+    def _latest_변환결과(self):
+        b = self.config.get('저장폴더')
+        if not b or not os.path.isdir(b):
+            return None
+        import glob
+        hits = glob.glob(os.path.join(b, "*", "*", "변환결과", "*.xlsx"))
+        return max(hits, key=os.path.getmtime) if hits else None
+
+    def _refresh_maemae(self):
+        if self.maemae_file:
+            self._mark_done(*self._m1)
+        self.btn_maemae.set_enabled(bool(self.maemae_file) and not self._busy)
+
+    def run_maemae(self):
+        if self._busy or not self.maemae_file:
+            return
+        if not self._require_folder():
+            return
+        self._busy = True
+        self.btn_maemae.set_enabled(False)
+        self.maemae_result.pack_forget()
+        self.log("─" * 30)
+        self.log("매입·매출 집계를 시작합니다...")
+        threading.Thread(target=self._maemae_worker, daemon=True).start()
+
+    def _maemae_worker(self):
+        try:
+            out_dir = self._sess_out(self.maemae_file, "매입매출")
+            stamp = datetime.datetime.now().strftime("%H%M%S")
+            결과 = []
+            for mode in ('매입', '매출'):
+                out_path = os.path.join(out_dir, "%s_%s.xlsx" % (mode, stamp))
+                try:
+                    시트수, 총 = engine.매입매출집계(self.maemae_file, mode, out_path, log=self.log)
+                    결과.append((mode, 시트수, 총))
+                except Exception as ex:
+                    self.log("⚠️ %s 건너뜀: %s" % (mode, str(ex)))
+            self.maemae_dir = out_dir
+            self.root.after(0, lambda: self._show_maemae(결과))
+        except Exception as ex:
+            self.log("─" * 30)
+            self.log("❌ 오류: " + str(ex))
+            self.log(traceback.format_exc())
+        finally:
+            self._busy = False
+            self.root.after(0, self._refresh_maemae)
+
+    def _show_maemae(self, 결과):
+        if not 결과:
+            self.maemae_msg.config(text="⚠️ 집계할 게 없었어요. (출고지/별칭 열을 확인해 주세요)")
+            self.maemae_result.pack(fill="x")
+            return
+        lines = ["✅ 집계 완료"]
+        for mode, s, t in 결과:
+            lines.append("     %s: %d개 시트 · 총합계 %s원" % (mode, s, format(int(t), ",")))
+        self.maemae_msg.config(text="\n".join(lines))
+        self.btn_maemae_open.pack(fill="x", pady=(10, 4))
+        self.maemae_result.pack(fill="x")
+
+    def open_maemae_folder(self):
+        if self.maemae_dir and os.path.exists(self.maemae_dir):
+            try:
+                os.startfile(self.maemae_dir)
             except OSError as ex:
                 self.log("폴더 열기 실패: " + str(ex))
 

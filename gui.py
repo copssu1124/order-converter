@@ -20,7 +20,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "4.7"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "4.8"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -362,7 +362,42 @@ class ConverterApp:
         self.log("주문서를 불러오고 [변환 실행]을 누르세요.")
         self._refresh_conv()
         self._drain_log()
+        self._bring_to_front()
+        self._show_update_banner_if_needed()
         threading.Thread(target=self._check_update, daemon=True).start()
+
+    def _bring_to_front(self):
+        """실행(특히 업데이트 재시작) 직후 창을 잠깐 맨 앞으로 — 뒤에 숨는 문제 완화."""
+        try:
+            self.root.lift()
+            self.root.attributes("-topmost", True)
+            self.root.after(900, lambda: self.root.attributes("-topmost", False))
+        except Exception:
+            pass
+
+    def _show_update_banner_if_needed(self):
+        """이전 실행에서 자동 업데이트가 끝났으면(.updated 표식) 첫 실행 때 안내창을 띄운다."""
+        try:
+            mp = os.path.join(app_dir(), ".updated")
+            if not os.path.exists(mp):
+                return
+            try:
+                with open(mp, "r", encoding="utf-8") as f:
+                    old = f.read().strip()
+            except Exception:
+                old = ""
+            try:
+                os.remove(mp)
+            except Exception:
+                pass
+            if old and old != VERSION:
+                msg = "이전 v%s → 최신 v%s 로 업데이트되었습니다!  🎉" % (old, VERSION)
+            else:
+                msg = "최신 버전 v%s 로 업데이트되었습니다!  🎉" % VERSION
+            from tkinter import messagebox
+            self.root.after(600, lambda: messagebox.showinfo("업데이트 완료", msg, parent=self.root))
+        except Exception:
+            pass
 
     # ═══════════ 헤더 ═══════════
     def _build_header(self):
@@ -1127,7 +1162,7 @@ class ConverterApp:
             url = "https://api.github.com/repos/%s/releases/latest" % GITHUB_REPO
             req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
                                                        "User-Agent": "order-converter"})
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             최신 = _버전튜플(str(data.get("tag_name", "")))
             현재 = _버전튜플(VERSION)
@@ -1183,6 +1218,8 @@ class ConverterApp:
             ww, wh = win.winfo_width(), win.winfo_height()
             win.geometry("+%d+%d" % (rx + (rw - ww) // 2, ry + (rh - wh) // 3))
             win.grab_set()
+            win.lift()
+            win.attributes("-topmost", True)
         except Exception:
             pass
 
@@ -1240,6 +1277,11 @@ class ConverterApp:
                 raise RuntimeError(사유)
             os.replace(part, tmp)
             self._set_status(status, "교체 후 자동 재시작합니다...", OKC)
+            try:    # 교체 후 새 버전이 처음 켜질 때 "업데이트되었습니다" 안내를 띄우기 위한 표식
+                with open(os.path.join(app_dir(), ".updated"), "w", encoding="utf-8") as mf:
+                    mf.write(VERSION)
+            except Exception:
+                pass
             self._launch_replace_bat(tmp, target)
             self.root.after(400, self._quit_for_update)
         except Exception as ex:

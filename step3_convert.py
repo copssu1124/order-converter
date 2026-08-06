@@ -1312,7 +1312,7 @@ def 발주서분리(converted_file, 발화주명, 양식폴더, out_dir, log=pri
 # 매입/매출 집계 — 변환결과 → 사이트(출고지/별칭)별 다중시트 엑셀
 #   매입: 출고지별,  총합계 = Σ배송비합계
 #   매출: 별칭(쇼핑몰계정)별, 총합계 = Σ배송비 + Σ정산예상금액
-#   레이아웃: A/B=그룹, D=상품명(정리), G=합계수량, R1=총합계, S1=라벨
+#   레이아웃: A/B=그룹, D=상품명(정리), G=합계수량(낱개×묶음), R1=총합계, S1=라벨
 #   열은 '이름'으로 찾음(순서 무관).
 # ═════════════════════════════════════════════════════════
 def 상품명정리(v):
@@ -1321,6 +1321,34 @@ def 상품명정리(v):
     s = re.sub(r'\*\s*\d+\s*$', '', s).strip()
     s = re.sub(r'\([^)]*\)\s*$', '', s).strip()
     return s
+
+
+def _낱개_묶음(상품명):
+    """상품명에서 (낱개수)와 끝의 *묶음수를 뽑는다. 예: 'DW -4호(6ea)*2' → (6, 2).
+       - 낱개수: 끝 괄호 안 숫자(6ea·50개·50장·50매·낱개2개…). 없으면 1.
+       - 묶음수: 끝의 *N. 없으면 None(호출부에서 수량 칸으로 대체)."""
+    s = '' if pd.isna(상품명) else str(상품명)
+    m = re.search(r'\*\s*(\d+)\s*$', s)
+    묶음 = int(m.group(1)) if m else None
+    s2 = re.sub(r'\*\s*\d+\s*$', '', s).strip()          # *N 떼고
+    m2 = re.search(r'\(([^)]*)\)\s*$', s2)               # 끝 괄호 안 숫자 = 낱개
+    낱개 = 1
+    if m2:
+        nums = re.findall(r'\d+', m2.group(1))
+        if nums:
+            낱개 = int(nums[-1])
+    return 낱개, 묶음
+
+
+def _펼친수량(상품명, 수량기본):
+    """집계용 실제 총 개수 = 낱개수 × 묶음수. 묶음수는 상품명의 *N 우선, 없으면 수량 칸."""
+    낱개, 묶음 = _낱개_묶음(상품명)
+    if 묶음 is None:
+        묶음 = 수량기본
+    try:
+        return int(낱개) * int(round(float(묶음)))
+    except (TypeError, ValueError):
+        return 0
 
 
 def 매입매출집계(converted_file, mode, out_path, log=print):
@@ -1343,7 +1371,7 @@ def 매입매출집계(converted_file, mode, out_path, log=print):
         if 그룹c is None:
             raise RuntimeError("이 파일에 '출고지' 열이 없어 매입 집계를 못 해요. (매출은 별칭으로 가능)")
         총합열 = [col('배송비합계')]
-        라벨, 그룹칸 = '배송비합계+택배등급 토탈', 1        # A열
+        라벨, 그룹칸 = '배송비합계(택배비) 토탈', 1        # A열
     else:
         그룹c = col('별칭(쇼핑몰계정)', '별칭')
         if 그룹c is None:
@@ -1356,7 +1384,7 @@ def 매입매출집계(converted_file, mode, out_path, log=print):
 
     df = df.copy()
     df['_상품'] = df[상품c].map(상품명정리)
-    df['_수량'] = num(df[수량c])
+    df['_수량'] = [_펼친수량(sp, qb) for sp, qb in zip(df[상품c].tolist(), num(df[수량c]).tolist())]
     df['_총'] = 0
     for c in 총합열:
         if c is not None:

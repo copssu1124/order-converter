@@ -20,7 +20,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "5.0"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "5.1"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -337,6 +337,10 @@ class ConverterApp:
                              "btn": _fnt(12, "bold")}
 
         root.title("주문서 변환기 · JJ COMPANY   v" + VERSION)
+        try:                                    # 창/작업표시줄 아이콘(JJ·네이비). 실패해도 무시
+            root.iconbitmap(os.path.join(ui_dir(), "appicon.ico"))
+        except Exception:
+            pass
         W, H = 600, 920
         try:
             sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()

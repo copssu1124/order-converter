@@ -20,7 +20,7 @@ import tkinter.font as tkfont
 
 import step3_convert as engine
 
-VERSION = "5.1"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "5.2"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -341,6 +341,12 @@ class ConverterApp:
             root.iconbitmap(os.path.join(ui_dir(), "appicon.ico"))
         except Exception:
             pass
+        try:                                    # 모든 창(업데이트 팝업 등)에도 아이콘 적용(참조 유지 필수)
+            self._appicon = tk.PhotoImage(file=os.path.join(ui_dir(), "appicon.png"))
+            root.iconphoto(True, self._appicon)
+        except Exception:
+            pass
+        root.after(120, self._apply_taskbar_icon)   # 작업표시줄 큰 아이콘까지 확실히(깃털 제거)
         W, H = 600, 920
         try:
             sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
@@ -369,6 +375,33 @@ class ConverterApp:
         self._bring_to_front()
         self._show_update_banner_if_needed()
         threading.Thread(target=self._check_update, daemon=True).start()
+
+    def _apply_taskbar_icon(self):
+        """작업표시줄 아이콘까지 확실히 교체 — Win32 WM_SETICON으로 창의 BIG/SMALL 아이콘 덮어씀.
+           (tkinter iconbitmap/iconphoto만으론 프로즌 exe 작업표시줄이 Tk 기본 깃털로 남는 문제 해결)"""
+        try:
+            ico = os.path.join(ui_dir(), "appicon.ico")
+            if not os.path.exists(ico):
+                return
+            u = ctypes.windll.user32
+            u.GetParent.restype = ctypes.c_void_p
+            u.GetParent.argtypes = [ctypes.c_void_p]
+            u.LoadImageW.restype = ctypes.c_void_p
+            u.LoadImageW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint,
+                                     ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+            u.SendMessageW.restype = ctypes.c_void_p
+            u.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+            inner = self.root.winfo_id()
+            hwnd = u.GetParent(inner) or inner
+            IMAGE_ICON, LR_FILE, LR_DEF, WM_SETICON = 1, 0x10, 0x40, 0x0080
+            big = u.LoadImageW(None, ico, IMAGE_ICON, 0, 0, LR_FILE | LR_DEF)
+            small = u.LoadImageW(None, ico, IMAGE_ICON, 16, 16, LR_FILE)
+            if big:
+                u.SendMessageW(hwnd, WM_SETICON, 1, big)     # ICON_BIG (작업표시줄)
+            if small:
+                u.SendMessageW(hwnd, WM_SETICON, 0, small)   # ICON_SMALL (타이틀바)
+        except Exception:
+            pass
 
     def _bring_to_front(self):
         """실행(특히 업데이트 재시작) 직후 창을 잠깐 맨 앞으로 — 뒤에 숨는 문제 완화."""
@@ -1352,6 +1385,10 @@ def main():
             ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
             pass
+    try:    # 작업표시줄이 파이썬/기본 아이콘 대신 이 앱 고유 아이콘을 쓰도록(창 아이콘 반영)
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("JJCompany.OrderConverter")
+    except Exception:
+        pass
     load_fonts()
     root = tk.Tk()
     ConverterApp(root)

@@ -1372,12 +1372,14 @@ def 매입매출집계(converted_file, mode, out_path, log=print):
             raise RuntimeError("이 파일에 '출고지' 열이 없어 매입 집계를 못 해요. (매출은 별칭으로 가능)")
         총합열 = [col('배송비합계')]
         라벨, 그룹칸 = '배송비합계(택배비) 토탈', 1        # A열
+        총합열2, 라벨2 = [col('택배등급')], '택배등급 토탈'   # 배송비합계와 '따로' R2·S2에 표기(더하지 않음)
     else:
         그룹c = col('별칭(쇼핑몰계정)', '별칭')
         if 그룹c is None:
             raise RuntimeError("이 파일에 '별칭(쇼핑몰계정)' 열이 없어 매출 집계를 못 해요.")
         총합열 = [col('배송비'), col('정산예상금액')]
         라벨, 그룹칸 = '배송비+정산예정금액 토탈', 2        # B열
+        총합열2, 라벨2 = None, None
 
     def num(s):
         return pd.to_numeric(s, errors='coerce').fillna(0)
@@ -1389,6 +1391,11 @@ def 매입매출집계(converted_file, mode, out_path, log=print):
     for c in 총합열:
         if c is not None:
             df['_총'] = df['_총'] + num(df[c])
+    df['_총2'] = 0
+    if 총합열2:
+        for c in 총합열2:
+            if c is not None:
+                df['_총2'] = df['_총2'] + num(df[c])
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
@@ -1411,6 +1418,9 @@ def 매입매출집계(converted_file, mode, out_path, log=print):
             ws.cell(row=r, column=7, value=int(row['_수량']))       # G
         ws.cell(row=1, column=18, value=총)                        # R1
         ws.cell(row=1, column=19, value=라벨)                      # S1
+        if 총합열2:                                                # 택배등급 토탈을 바로 아래(R2·S2)에 따로
+            ws.cell(row=2, column=18, value=int(round(gdf['_총2'].sum())))
+            ws.cell(row=2, column=19, value=라벨2)
         ws.column_dimensions['D'].width = 34
         시트수 += 1
 

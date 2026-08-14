@@ -337,7 +337,7 @@ def _load_mapping(mapping_file, log):
             매핑표[정규화(str(원본))] = str(변환).strip()
 
     판매비표 = {}
-    for i in range(99, len(판매비원본)):
+    for i in range(len(판매비원본)):          # 전체 행 스캔(회사별 매칭표가 데이터를 위쪽에 둬도 대응)
         키 = 판매비원본.iloc[i, 5]
         값 = 판매비원본.iloc[i, 6]
         if pd.notna(키) and pd.notna(값):

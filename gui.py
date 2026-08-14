@@ -19,8 +19,9 @@ from tkinter import filedialog, ttk
 import tkinter.font as tkfont
 
 import step3_convert as engine
+import jj_convert   # 2차 재변환(수정데이터) — 색상 보존형
 
-VERSION = "5.2"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "5.3"                 # ★ 버전은 이 한 곳에서만 관리
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -301,6 +302,7 @@ class ConverterApp:
         self.root = root
         self.input_file = None
         self.mapping_file = None
+        self.sus_file = None
         self.output_file = None
         self.conv_file = None
         self.split_dir = None
@@ -369,6 +371,7 @@ class ConverterApp:
         if auto:
             self.mapping_file = auto
             self._set_file("map", os.path.basename(auto), "자동으로 찾았어요 ✓", ok=True)
+            self._auto_sus(auto)
         self.log("주문서를 불러오고 [변환 실행]을 누르세요.")
         self._refresh_conv()
         self._drain_log()
@@ -520,9 +523,9 @@ class ConverterApp:
         obj.set_done(done)
 
     def _build_conv(self, p):
-        tk.Label(p, text="두 파일만 고르면 끝이에요", bg=BG, fg=INK,
+        tk.Label(p, text="파일을 고르고 변환하세요", bg=BG, fg=INK,
                  font=self.F(22, True)).pack(anchor="w", pady=(22, 3))
-        tk.Label(p, text="주문서와 매핑표를 고르고 아래 초록 버튼을 누르세요",
+        tk.Label(p, text="주문서·매핑표를 고르면 변환하고, 수정데이터가 있으면 발주용으로 한 번 더 변환해요",
                  bg=BG, fg=SUB, font=self.F(12)).pack(anchor="w", pady=(0, 16))
 
         row_o = FileRow(p, 1, "주문서", self.rowfonts, self.pick_input)
@@ -530,12 +533,17 @@ class ConverterApp:
         self._rows["order"] = row_o
         self._c1 = (row_o,)
 
-        row_m = FileRow(p, 2, "매핑표", self.rowfonts, self.pick_mapping)
-        row_m.pack(fill="x", pady=(0, 14))
+        row_m = FileRow(p, 2, "매핑표(1차)", self.rowfonts, self.pick_mapping)
+        row_m.pack(fill="x", pady=(0, 9))
         self._rows["map"] = row_m
         self._c2 = (row_m,)
 
-        self.btn_conv = RoundBtn(p, "③   변환 실행", self.run_convert, kind="primary",
+        row_s = FileRow(p, 3, "수정데이터(2차·선택)", self.rowfonts, self.pick_sus)
+        row_s.pack(fill="x", pady=(0, 14))
+        self._rows["sus"] = row_s
+        self._c3 = (row_s,)
+
+        self.btn_conv = RoundBtn(p, "변환 실행", self.run_convert, kind="primary",
                                  height=62, fontobj=self.F(17, True), bgparent=BG, radius=16)
         self.btn_conv.pack(fill="x")
         self.btn_conv.set_enabled(False)
@@ -840,11 +848,12 @@ class ConverterApp:
                 self._set_file("map", os.path.basename(am), "자동으로 찾았어요 ✓", ok=True)
                 self._mark_done(*self._c2)
                 self.log("매핑표 자동 탐색: " + os.path.basename(am))
+                self._auto_sus(am)
         self._refresh_conv()
 
     def pick_mapping(self):
         start = os.path.dirname(self.mapping_file) if self.mapping_file else app_dir()
-        path = filedialog.askopenfilename(title="매핑표(.xlsx) 선택", initialdir=start,
+        path = filedialog.askopenfilename(title="매핑표(1차) 선택", initialdir=start,
                                           filetypes=[("엑셀 매핑표", "*.xlsx"), ("모든 파일", "*.*")])
         if not path:
             return
@@ -852,7 +861,36 @@ class ConverterApp:
         self._set_file("map", os.path.basename(path), "")
         self._mark_done(*self._c2)
         self.log("매핑표 선택: " + os.path.basename(path))
+        self._auto_sus(path)
         self._refresh_conv()
+
+    def _auto_sus(self, mapping_path):
+        """매핑표 안에 '수정데이터' 탭이 있으면 2차 소스로 자동 설정."""
+        if self.sus_file:
+            return
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(mapping_path, read_only=True)
+            has = "수정데이터" in wb.sheetnames
+            wb.close()
+        except Exception:
+            has = False
+        if has:
+            self.sus_file = mapping_path
+            self._set_file("sus", os.path.basename(mapping_path), "매핑표에서 자동 ✓", ok=True)
+            self._mark_done(*self._c3)
+
+    def pick_sus(self):
+        start = os.path.dirname(self.sus_file) if self.sus_file else \
+            (os.path.dirname(self.mapping_file) if self.mapping_file else app_dir())
+        path = filedialog.askopenfilename(title="수정데이터(2차) 선택", initialdir=start,
+                                          filetypes=[("엑셀", "*.xlsx"), ("모든 파일", "*.*")])
+        if not path:
+            return
+        self.sus_file = path
+        self._set_file("sus", os.path.basename(path), "")
+        self._mark_done(*self._c3)
+        self.log("수정데이터 선택: " + os.path.basename(path))
 
     def pick_conv(self):
         start = os.path.join(app_dir(), "변환결과")
@@ -901,7 +939,19 @@ class ConverterApp:
             out_path = os.path.join(결과폴더, base + ".xlsx")
             out, 사유 = engine.convert_v2(self.input_file, self.mapping_file, out_path, log=self.log)
             self.output_file = out
+            # 2차 재변환(수정데이터) — 있으면 발주용으로 한 번 더 (기존 색상 보존, 낱개 새 행만 색 복사)
+            미매칭 = []
+            if self.sus_file:
+                try:
+                    _, 미매칭 = jj_convert.이차재변환_제자리(out, self.sus_file, log=self.log)
+                except Exception as se:
+                    self.log("⚠ 2차 재변환 오류: " + str(se)[:120])
             총, 정상, 이슈 = engine.상세리포트(out, 사유)
+            for 상품, 수령 in 미매칭:
+                이슈.append({'행': '', '상품명': 상품, '수량': '',
+                             '문제': '수정데이터(2차)에 없는 상품이에요',
+                             '해결': '수정데이터 엑셀에 이 상품을 추가하면 자동 변환돼요 (수령자 %s)' % (수령 or '?')})
+            정상 = max(0, 총 - len(이슈))
             self._리포트출력(총, 정상, 이슈)
             self.log("")
             self.log("💾 저장 완료: " + out)

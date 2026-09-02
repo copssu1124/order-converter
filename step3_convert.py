@@ -1036,6 +1036,8 @@ _CJ등급 = {'S', 'A', 'B', 'C', 'D', 'E'}   # 씨제이 박스타입에 들어�
 발송인프로필 = {
     '제이제이컴퍼니': {'phone': '010-3495-8295'},
     '아이스앤팩':     {'phone': '010-4115-4339'},
+    '다다쇼핑':       {'phone': '010-9026-2500', 'address': '충청북도 청주시 청원구 북이면 충청대로1257-22 (우:28137)★파손시집하당담자에게 연락주세요 ★'},
+    '다모아패키지':   {'phone': '010-9026-2500', 'address': '충청북도 청주시 청원구 북이면 충청대로1257-22 (우:28137)★파손시집하당담자에게 연락주세요 ★'},
 }
 발송인기본 = '제이제이컴퍼니'
 
@@ -1084,7 +1086,7 @@ FORM_MAP = {
                         16: 'order'}},             # 2:상품명 3:옵션 / 6:총운임 / 16:상품주문번호
     #          15:배송메세지=배송메모
     '로젠': {'file': '로젠.xls', 'sheet': '발주발송관리', 'kind': 'xls',
-             'sender': {'name': 19, 'phone': 21},  # 보내는분 상호(19)·전화(21) ← 발송인 프로필
+             'sender': {'name': 19, 'phone': 21, 'addr': 20},  # 보내는분 상호(19)·주소(20)·전화(21) ← 발송인 프로필
              'fields': {1: 'recv', 3: 'addr', 4: 'phone', 6: 'qty', 7: 'total',
                         9: 'prod', 11: 'memo'}},   # 7(G):총운임 / 11:배송메세지
     '올담': {'file': '올담 발주 양식.xls', 'sheet': '올담', 'kind': 'xls',
@@ -1156,6 +1158,8 @@ def _fill_inplace(tpl, cfg, 행들, 발화주명, outp):
             for pk in ('phone', 'phone2'):
                 if prof.get('phone') and snd.get(pk):
                     ws.cell(row=rr, column=snd[pk], value=prof['phone'])
+            if prof.get('address') and snd.get('addr'):   # 발송인 주소(로젠 등 주소칸 있는 양식만)
+                ws.cell(row=rr, column=snd['addr'], value=prof['address'])
         if no_col:
             ws.cell(row=rr, column=no_col, value=i + 1)
         if cfg.get('hl_col') and d.get('_hl'):   # 대신낱개 등 강조 행 → 지정 열 연두
@@ -1199,6 +1203,8 @@ def _fill_rebuild(tpl, cfg, 행들, 발화주명, outp):
             for pk in ('phone', 'phone2'):
                 if prof.get('phone') and snd.get(pk):
                     ows.cell(row=rr, column=snd[pk], value=prof['phone'])
+            if prof.get('address') and snd.get('addr'):   # 발송인 주소(로젠 등 주소칸 있는 양식만)
+                ows.cell(row=rr, column=snd['addr'], value=prof['address'])
         if cfg.get('hl_col') and d.get('_hl'):   # 대신낱개 등 강조 행 → 지정 열 연두
             ows.cell(row=rr, column=cfg['hl_col']).fill = _fill('92D050')
     owb.save(outp)

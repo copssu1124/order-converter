@@ -1357,8 +1357,9 @@ def _펼친수량(상품명, 수량기본):
         return 0
 
 
-def 매입매출집계(converted_file, mode, out_path, log=print):
-    """변환결과를 매입/매출로 집계해 사이트별 다중시트 엑셀 저장. 반환: (시트수, 총합계)."""
+def 매입매출집계(converted_file, mode, out_path, log=print, breakdown=None):
+    """변환결과를 매입/매출로 집계해 사이트별 다중시트 엑셀 저장. 반환: (시트수, 총합계).
+       breakdown 에 리스트를 주면 그룹별 (그룹명, 주문건수, 총합계) 를 채워준다(새 UI 표시용)."""
     df = pd.read_excel(converted_file, header=0)
     cols = {str(c).strip(): c for c in df.columns}
 
@@ -1411,6 +1412,8 @@ def 매입매출집계(converted_file, mode, out_path, log=print):
         agg = agg[agg['_상품'] != ''].sort_values('_상품')
         총 = int(round(gdf['_총'].sum()))
         총합계전체 += 총
+        if breakdown is not None:
+            breakdown.append((str(gval), int(len(gdf)), 총))
         sn = re.sub(r'[\[\]\:\*\?\/\\]', ' ', str(gval)).strip()[:31] or 'Sheet'
         base, i = sn, 2
         while sn in used:

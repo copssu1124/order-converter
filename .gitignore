@@ -19,3 +19,6 @@ __pycache__/
 # Claude Code 로컬 설정 / 작업 부산물(백업·임시 스크립트)
 .claude/
 클로드_작업파일/
+
+# 민감 파일 (절대 커밋 금지)
+github-recovery-codes.txt

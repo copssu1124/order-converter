@@ -21,7 +21,7 @@ import tkinter.font as tkfont
 import step3_convert as engine
 import jj_convert   # 2차 재변환(수정데이터) — 색상 보존형
 
-VERSION = "5.4"                 # ★ 버전은 이 한 곳에서만 관리
+VERSION = "6.0"                 # ★ 버전은 이 한 곳에서만 관리 (gui_ctk.py 도 여기서 읽음)
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"

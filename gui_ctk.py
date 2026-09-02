@@ -184,6 +184,7 @@ class App(ctk.CTk):
         self.semi = "Pretendard JJ SemiBold" if "Pretendard JJ SemiBold" in fams else self.reg
         self._icons = {}
         self._fonts = {}
+        self.F = lambda s, b=False: (self.reg, s, "bold") if b else (self.reg, s)   # 빌려 쓰는 옛 코드 호환(pt 단위)
         self.title("주문서 변환기 · JJ COMPANY   v" + VERSION)
         self.geometry("1100x720")          # 스펙
         self.minsize(1040, 720)            # 스펙
@@ -1051,6 +1052,62 @@ class App(ctk.CTk):
             except OSError as ex:
                 self.log("엑셀 열기 실패: " + str(ex))
 
+    # ── 자동 업데이트 팝업 (새 디자인). 다운로드·교체 로직은 gui.py 의 _do_update 그대로 ──
+    def _update_popup(self, new_ver, download_url):
+        try:
+            win = ctk.CTkToplevel(self)
+            win.title("업데이트")
+            win.configure(fg_color=BG)
+            win.resizable(False, False)
+            try:
+                win.after(200, lambda: win.iconbitmap(os.path.join(G0.ui_dir(), "appicon.ico")))
+            except Exception:
+                pass
+            card = self._card(win)
+            card.pack(fill="both", expand=True, padx=16, pady=16)
+            ctk.CTkLabel(card, text="새 버전 v%s 이(가) 나왔어요!" % new_ver, font=self.f(17, "bold"),
+                         text_color=INK).pack(padx=36, pady=(24, 4))
+            ctk.CTkLabel(card, text="지금 업데이트하면 자동으로 교체 후 다시 시작됩니다.", font=self.f(13),
+                         text_color=SUB).pack(pady=(0, 10))
+            status = tk.Label(card, text="", bg=CARD, fg=BRAND, font=(self.reg, 10, "bold"))   # 옛 로직이 .config(text, fg)로 갱신
+            status.pack(pady=(0, 8))
+            bar = ctk.CTkFrame(card, fg_color="transparent")
+            bar.pack(fill="x", padx=26, pady=(0, 22))
+            later_w = self._sec_btn(bar, "나중에", height=42, width=110, command=win.destroy)
+            later_w.pack(side="left")
+            btn_later = _Btn(later_w, lambda: "나중에")
+            now_w = ctk.CTkButton(bar, text="지금 업데이트", height=42, corner_radius=10, fg_color=BRAND,
+                                  hover_color=BRAND_HOVER, text_color="white", font=self.f(14, "bold"))
+            now_w.pack(side="left", fill="x", expand=True, padx=(10, 0))
+
+            def 지금():
+                now_w.configure(state="disabled", fg_color=BRAND_DIS, hover_color=BRAND_DIS)
+                btn_later.set_enabled(False)
+                threading.Thread(target=self._do_update, args=(download_url, win, status, btn_later), daemon=True).start()
+            now_w.configure(command=지금)
+            win.update_idletasks()
+            rx, ry, rw, rh = self.winfo_rootx(), self.winfo_rooty(), self.winfo_width(), self.winfo_height()
+            ww, wh = win.winfo_reqwidth(), win.winfo_reqheight()
+            win.geometry("+%d+%d" % (rx + (rw - ww) // 2, ry + (rh - wh) // 3))
+            win.lift()
+            win.attributes("-topmost", True)
+            win.after(300, win.grab_set)
+        except Exception:
+            self.log("⚠️ 업데이트 안내 창을 여는 중 문제가 있었어요. 문의방 또는 Releases 페이지에서 받아주세요.")
+
+    def _set_status(self, status, text, color=None):
+        self.after(0, lambda: status.config(text=text, fg=color or BRAND))
+
+    def _manual_fallback(self, win, status, msg, btn_later=None):
+        def show():
+            status.config(text=msg, fg=REQ)
+            ctk.CTkButton(win, text="수동 다운로드 (Releases 페이지 열기)", fg_color="transparent", hover_color=BG,
+                          text_color=BRAND, font=self.f(13, "semi"),
+                          command=lambda: webbrowser.open(G0.RELEASES_URL)).pack(pady=(0, 14))
+            if btn_later is not None:
+                btn_later.set_enabled(True)
+        self.after(0, show)
+
     def _setver(self, text, color=None):
         if "최신" in text:
             t, c = "✓ 최신", ACCENT
@@ -1068,7 +1125,7 @@ for _n in ("_config_path", "_load_config", "_save_config", "pick_folder", "_base
            "pick_conv", "_form_dirs", "_split_worker", "open_split_folder",
            "pick_maemae", "_auto_maemae_file", "_latest_변환결과", "open_maemae_folder",
            "_manual_path", "open_manual",
-           "_check_update", "_update_popup", "_set_status", "_manual_fallback", "_do_update", "_quit_for_update",
+           "_check_update", "_do_update", "_quit_for_update",
            "_launch_replace_bat", "_apply_taskbar_icon", "_bring_to_front", "_show_update_banner_if_needed"):
     setattr(App, _n, getattr(G0.ConverterApp, _n))
 

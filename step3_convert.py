@@ -1357,9 +1357,10 @@ def _펼친수량(상품명, 수량기본):
         return 0
 
 
-def 매입매출집계(converted_file, mode, out_path, log=print, breakdown=None):
+def 매입매출집계(converted_file, mode, out_path, log=print, breakdown=None, 회사명=None):
     """변환결과를 매입/매출로 집계해 사이트별 다중시트 엑셀 저장. 반환: (시트수, 총합계).
-       breakdown 에 리스트를 주면 그룹별 (그룹명, 주문건수, 총합계) 를 채워준다(새 UI 표시용)."""
+       breakdown 에 리스트를 주면 그룹별 (그룹명, 주문건수, 총합계) 를 채워준다(새 UI 표시용).
+       회사명 을 주면(예: '제이제이컴퍼니(유)') 그룹명 대신 A열에 회사명을 줄마다 쓰고 B열은 비운다. None 이면 기존과 동일."""
     df = pd.read_excel(converted_file, header=0)
     cols = {str(c).strip(): c for c in df.columns}
 
@@ -1404,8 +1405,14 @@ def 매입매출집계(converted_file, mode, out_path, log=print, breakdown=None
             if c is not None:
                 df['_총2'] = df['_총2'] + num(df[c])
 
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active)
+    # 저장 형식: out_path 가 .xls 면 Excel 97-2003(xlwt, ERP 직접 등록용), 아니면 .xlsx(openpyxl)
+    use_xls = str(out_path).lower().endswith('.xls')
+    if use_xls:
+        import xlwt
+        wb = xlwt.Workbook(encoding='utf-8')
+    else:
+        wb = openpyxl.Workbook()
+        wb.remove(wb.active)
     used, 시트수, 총합계전체 = set(), 0, 0
     for gval, gdf in df.groupby(그룹c, dropna=True):
         agg = gdf.groupby('_상품', as_index=False)['_수량'].sum()
@@ -1420,21 +1427,33 @@ def 매입매출집계(converted_file, mode, out_path, log=print, breakdown=None
             sn = f"{base[:28]}_{i}"
             i += 1
         used.add(sn)
-        ws = wb.create_sheet(sn)
+        if use_xls:
+            ws = wb.add_sheet(sn)
+            put = lambda r, c, v, ws=ws: ws.write(r - 1, c - 1, v)      # xlwt 는 0부터
+            ws.col(3).width = 34 * 256                                  # D열 폭
+        else:
+            ws = wb.create_sheet(sn)
+            put = lambda r, c, v, ws=ws: ws.cell(row=r, column=c, value=v)
+            ws.column_dimensions['D'].width = 34
         for r, (_, row) in enumerate(agg.iterrows(), start=1):
-            ws.cell(row=r, column=그룹칸, value=str(gval))
-            ws.cell(row=r, column=4, value=row['_상품'])            # D
-            ws.cell(row=r, column=7, value=int(row['_수량']))       # G
-        ws.cell(row=1, column=18, value=총)                        # R1
-        ws.cell(row=1, column=19, value=라벨)                      # S1
+            if 회사명:                                   # 회사명 지정: A열=회사명, (매출의) B열 별칭은 쓰지 않음
+                put(r, 1, 회사명)
+            else:
+                put(r, 그룹칸, str(gval))
+            put(r, 4, row['_상품'])                                  # D
+            put(r, 7, int(row['_수량']))                             # G
+        put(1, 18, 총)                                               # R1
+        put(1, 19, 라벨)                                             # S1
         if 총합열2:                                                # 택배등급 토탈을 바로 아래(R2·S2)에 따로
-            ws.cell(row=2, column=18, value=int(round(gdf['_총2'].sum())))
-            ws.cell(row=2, column=19, value=라벨2)
-        ws.column_dimensions['D'].width = 34
+            put(2, 18, int(round(gdf['_총2'].sum())))
+            put(2, 19, 라벨2)
         시트수 += 1
 
     if 시트수 == 0:
-        wb.create_sheet('결과없음')
+        if use_xls:
+            wb.add_sheet('결과없음')
+        else:
+            wb.create_sheet('결과없음')
     wb.save(out_path)
     log(f"{mode} 집계 완료: {시트수}개 시트 / 총합계 {총합계전체:,}원")
     return 시트수, 총합계전체

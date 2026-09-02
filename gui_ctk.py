@@ -36,6 +36,7 @@ BW = 1   # 스펙: 1px 테두리. (자식 위젯이 테두리 위를 덮지 않�
 FONT_PLUS = int(os.environ.get("CTK_FONT_PLUS", "2"))      # 글자 크기 보정: 스펙보다 +2px (사용자 요청: 가독성)
 UI_SCALE = float(os.environ.get("CTK_SCALE", "1"))         # 전체 확대(창 포함, 비율 유지) 기본 1.0
 SENDERS = ["제이제이컴퍼니", "아이스앤팩", "다다쇼핑", "다모아패키지"]
+COMPANIES = ["제이제이컴퍼니(유)"]       # 매입·매출 집계 파일 A열에 표기할 회사명 (선택 안 하면 기존 방식)
 
 HELP_SECTIONS = [
     ("주문서 변환",
@@ -48,8 +49,10 @@ HELP_SECTIONS = [
      "같은 세션 폴더의 '분리출력'에 택배사별 발주서가 만들어집니다. 발송인의 이름·전화(로젠은 주소까지)가 발주서에 들어갑니다.\n"
      "양식: 씨제이(R열 운임) · 대신/대신낱개(연두=낱개) · 대신택배 · 천일(K열) · 로젠(G열) · 원준(L열) · 위플(F열) · 올담 · 카몬드 / 그 외는 '기타'"),
     ("매입·매출 집계",
-     "저장 폴더의 최근 변환결과가 자동으로 들어갑니다. [집계 실행]을 누르면 매입(출고지별)과 매출(별칭별) 파일이 '매입매출' 폴더에 저장되고,\n"
-     "오른쪽 표에서 매입/매출을 전환해 건수·금액·합계를 바로 볼 수 있습니다. 출고지 열이 없는 주문서는 매출만 집계됩니다."),
+     "저장 폴더의 최근 변환결과가 자동으로 들어갑니다. [집계 실행]을 누르면 매입(출고지별)과 매출(별칭별) 파일이 '매입매출' 폴더에 "
+     "Excel 97-2003(.xls) 형식으로 저장되고(ERP 바로 등록용),\n"
+     "오른쪽 표에서 매입/매출을 전환해 건수·금액·합계를 바로 볼 수 있습니다. 출고지 열이 없는 주문서는 매출만 집계됩니다.\n"
+     "회사명을 고르면(예: 제이제이컴퍼니(유)) 집계 파일 A열에 회사명이 줄마다 들어가고 B열은 비웁니다. 안 고르면 기존과 같습니다."),
     ("저장 폴더",
      "처음 한 번 [변경]으로 지정하면 기억합니다. 모든 결과는 그 폴더 안에 날짜·시간별로 자동 정리되어 나중에 찾기 쉽습니다."),
     ("주문서 규칙",
@@ -480,6 +483,70 @@ class App(ctk.CTk):
         tb.configure(state="disabled")
         return tb
 
+    def _dropdown(self, parent, var, values, placeholder="선택 안 함", allow_none=True, pady=(0, 12)):
+        """네모 드롭다운 (스펙 46/r9/#D3DAE6) + 디자인에 맞춘 흰 카드형 팝업 목록.
+           var 가 빈 값이면 placeholder 를 흐리게. 반환 객체: .set(v) / .open() / .label"""
+        box = ctk.CTkFrame(parent, height=46, corner_radius=9, border_width=BW, border_color=CTRL_BD, fg_color=CARD)
+        box.pack(fill="x", padx=18, pady=pady)
+        box.pack_propagate(False)
+        lbl = ctk.CTkLabel(box, text=var.get() or placeholder, font=self.f(14, "semi"),
+                           text_color=INK if var.get() else FAINT)
+        lbl.pack(side="left", padx=16)
+        chev = ctk.CTkLabel(box, text="", image=self.icon("chev", SUB, 16))
+        chev.pack(side="right", padx=16)
+        state = {"pop": None}
+
+        def set_value(v):
+            v = "" if v == placeholder else v
+            var.set(v)
+            lbl.configure(text=v or placeholder, text_color=INK if v else FAINT)
+
+        def close(_e=None):
+            p, state["pop"] = state["pop"], None
+            if p is not None:
+                try:
+                    p.destroy()
+                except Exception:
+                    pass
+                box.configure(border_color=CTRL_BD)
+
+        def open_menu(_e=None):
+            if state["pop"] is not None:
+                close(); return
+            items = ([placeholder] if allow_none else []) + list(values)
+            KEY = "#FF00FE"                                   # 투명 처리용 키 색 → 카드의 둥근 모서리 밖이 비침
+            pop = ctk.CTkToplevel(self)
+            pop.overrideredirect(True)
+            pop.configure(fg_color=KEY)
+            try:
+                pop.attributes("-transparentcolor", KEY)
+            except Exception:
+                pop.configure(fg_color=CARD)
+            pop.attributes("-topmost", True)
+            card = ctk.CTkFrame(pop, corner_radius=10, fg_color=CARD, border_width=1, border_color=CTRL_BD)
+            card.pack(fill="both", expand=True)
+            cur = var.get() or placeholder
+            for i, v in enumerate(items):
+                on = (v == cur)
+                ctk.CTkButton(card, text=("✓   " if on else "      ") + v, anchor="w", height=38, corner_radius=8,
+                              fg_color=SEL_BG if on else "transparent", hover_color=SEL_BG,
+                              text_color=BRAND if on else (FAINT if v == placeholder else INK),
+                              font=self.f(14, "semi" if on else "r"),
+                              command=lambda v=v: (set_value(v), close())).pack(
+                    fill="x", padx=6, pady=(6 if i == 0 else 2, 6 if i == len(items) - 1 else 0))
+            pop.update_idletasks()
+            w, h = box.winfo_width(), card.winfo_reqheight()
+            pop.geometry("%dx%d+%d+%d" % (w, h, box.winfo_rootx(), box.winfo_rooty() + box.winfo_height() + 4))
+            box.configure(border_color=BRAND)                 # 열려 있는 동안 상자 테두리 파랑
+            state["pop"] = pop
+            pop.bind("<Escape>", close)
+            pop.bind("<FocusOut>", lambda e: pop.after(150, lambda: close() if state["pop"] is pop and pop.focus_displayof() is None else None))
+            pop.focus_force()
+        for w in (box, lbl, chev):
+            w.bind("<Button-1>", open_menu)
+        import types
+        return types.SimpleNamespace(box=box, label=lbl, set=set_value, open=open_menu, close=close)
+
     def _screen(self):
         scr = ctk.CTkFrame(self.body, fg_color="transparent")
         scr.grid_columnconfigure(0, minsize=468)
@@ -561,7 +628,7 @@ class App(ctk.CTk):
         return scr
 
     # 진행 상황 카드 (헤더 + 빈 상태 + 숨긴 로그 상자). key별로 self.logs에 등록 → _append_log 가 채움
-    def _log_card(self, parent, key, height=None):
+    def _log_card(self, parent, key, height=None, icon=True):
         card = self._card(parent)
         status = self._card_header(card, "진행 상황", "● 대기 중", FAINT)
         empty = ctk.CTkFrame(card, fg_color="transparent", height=height or 0)
@@ -570,7 +637,7 @@ class App(ctk.CTk):
             empty.pack_propagate(False)
         box = ctk.CTkFrame(empty, fg_color="transparent")
         box.pack(expand=True)
-        if not height:
+        if not height and icon:
             ctk.CTkLabel(box, text="", image=self.icon("doc", VALNONE, 34)).pack(pady=(0, 10))
         ctk.CTkLabel(box, text="실행하면 여기에 진행 상황이 표시됩니다.", font=self.f(14 if not height else 13), text_color=OPT).pack()
         tb = self._log_box(card, show=False, height=height)
@@ -591,16 +658,8 @@ class App(ctk.CTk):
         sc.pack(fill="x", pady=(13, 0))
         ctk.CTkLabel(sc, text="보내는 회사 (발송인)", font=self.f(14, "bold"), text_color=INK).pack(anchor="w", padx=18, pady=(11, 0))
         ctk.CTkLabel(sc, text="택배사로 보낼 발주서의 발송인 정보로 들어갑니다.", font=self.f(12), text_color=SUB).pack(anchor="w", padx=18, pady=(2, 9))
-        cb = ctk.CTkFrame(sc, height=46, corner_radius=9, border_width=BW, border_color=CTRL_BD, fg_color=CARD)
-        cb.pack(fill="x", padx=18, pady=(0, 9))
-        cb.pack_propagate(False)
-        self.sender_box = cb
-        self.sender_lbl = ctk.CTkLabel(cb, text=self.발송인_var.get(), font=self.f(14, "semi"), text_color=INK)
-        self.sender_lbl.pack(side="left", padx=16)
-        chev = ctk.CTkLabel(cb, text="", image=self.icon("chev", SUB, 16))
-        chev.pack(side="right", padx=16)
-        for w in (cb, self.sender_lbl, chev):
-            w.bind("<Button-1>", lambda e: self._open_sender_menu())
+        self.sender_dd = self._dropdown(sc, self.발송인_var, SENDERS, allow_none=False, pady=(0, 9))
+        self.sender_lbl = self.sender_dd.label
         self._save_card(left)
         self.btn_split_w = self._main_btn(left, "택배사 분리 실행", "truck", command=self.run_split, pady=(8, 0))
         self.btn_split = _Btn(self.btn_split_w, lambda: "   택배사 분리 실행",
@@ -631,12 +690,20 @@ class App(ctk.CTk):
         slots.pack(fill="x", padx=18, pady=(0, 14))
         self.slots["maemae"] = self._slot(slots, 1, "변환결과 파일", "필수", on_pick=self.pick_maemae,
                                           on_clear=lambda: self._clear("maemae"))
+        # 회사명 (선택) — 고르면 집계 파일 A열에 회사명, B열 비움. 기본은 선택 안 함(기존 방식)
+        cc = self._card(left)
+        cc.pack(fill="x", pady=(13, 0))
+        ctk.CTkLabel(cc, text="회사명 (A열 표기)", font=self.f(14, "bold"), text_color=INK).pack(anchor="w", padx=18, pady=(11, 0))
+        ctk.CTkLabel(cc, text="고르면 집계 파일 A열에 회사명, B열은 빈칸. 안 고르면 기존과 같습니다.",
+                     font=self.f(12), text_color=SUB).pack(anchor="w", padx=18, pady=(2, 8))
+        self.회사명_var = tk.StringVar(value="")
+        self.company_dd = self._dropdown(cc, self.회사명_var, COMPANIES)
         self._save_card(left)
         self.btn_maemae_w = self._main_btn(left, "집계 실행", "chart", command=self.run_maemae, pady=(8, 0))
         self.btn_maemae = _Btn(self.btn_maemae_w, lambda: "   집계 실행",
                                lambda on: self._style_main_btn(self.btn_maemae_w, on))
-        ctk.CTkLabel(left, text="매입·매출 시트가 한 파일로 저장됩니다.", font=self.f(12), text_color=OPT).pack(pady=(10, 0))
-        self._log_card(left, "maemae", height=96).pack(fill="x", pady=(6, 0))
+        ctk.CTkLabel(left, text="매입·매출 시트가 한 파일로 저장됩니다.", font=self.f(12), text_color=OPT).pack(pady=(6, 0))
+        self._log_card(left, "maemae", icon=False).pack(fill="both", expand=True, pady=(6, 0))   # 남는 높이에 맞춰(잘림 방지)
 
         right.grid_rowconfigure(0, weight=1)
         rc = self._card(right)
@@ -746,11 +813,14 @@ class App(ctk.CTk):
             out_dir = self._sess_out(self.maemae_file, "매입매출")
             stamp = datetime.datetime.now().strftime("%H%M%S")
             결과 = {}
+            회사명 = self.회사명_var.get().strip() or None
+            if 회사명:
+                self.log("회사명 표기: %s (A열에 기입, B열 비움)" % 회사명)
             for mode in ('매입', '매출'):
-                out_path = os.path.join(out_dir, "%s_%s.xlsx" % (mode, stamp))
+                out_path = os.path.join(out_dir, "%s_%s.xls" % (mode, stamp))     # ERP 직접 등록용 97-2003 형식
                 rows = []
                 try:
-                    시트수, 총 = engine.매입매출집계(self.maemae_file, mode, out_path, log=self.log, breakdown=rows)
+                    시트수, 총 = engine.매입매출집계(self.maemae_file, mode, out_path, log=self.log, breakdown=rows, 회사명=회사명)
                     결과[mode] = {"rows": rows, "total": 총, "sheets": 시트수, "path": out_path}
                 except Exception as ex:
                     self.log("⚠️ %s 건너뜀: %s" % (mode, str(ex)))
@@ -815,24 +885,8 @@ class App(ctk.CTk):
         self._set_file("conv", os.path.basename(self.output_file), "방금 변환한 결과 ✓")
         self._refresh_split()
 
-    def _open_sender_menu(self):
-        b = self.sender_box
-        x, y = b.winfo_rootx(), b.winfo_rooty() + b.winfo_height() + 2
-        try:
-            from customtkinter.windows.widgets.dropdown_menu import DropdownMenu
-            if not hasattr(self, "_sender_menu"):
-                self._sender_menu = DropdownMenu(master=self, values=SENDERS, command=self._pick_sender,
-                                                 fg_color=CARD, hover_color=BG, text_color=INK, font=self.f(14))
-            self._sender_menu.open(x, y)
-        except Exception:
-            m = tk.Menu(self, tearoff=0, font=self.f(13))
-            for v in SENDERS:
-                m.add_command(label=v, command=lambda v=v: self._pick_sender(v))
-            m.tk_popup(x, y)
-
     def _pick_sender(self, v):
-        self.발송인_var.set(v)
-        self.sender_lbl.configure(text=v)
+        self.sender_dd.set(v)
 
     def run_split(self):
         if self._busy or not self.conv_file:

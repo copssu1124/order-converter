@@ -1,9 +1,9 @@
 {
   "output": "sample_thermos.mp4",
   "voice": "ko-KR-SunHiNeural",
-  "rate": "+18%",
-  "gap": 0.26,
-  "lead": 0.1,
+  "rate": "+20%",
+  "gap": 0.05,
+  "lead": 0.0,
   "fps": 30,
   "style": {
     "font": "Pretendard JJ",

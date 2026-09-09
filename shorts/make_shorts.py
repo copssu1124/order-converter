@@ -77,9 +77,25 @@ async def _tts_one(text, voice, rate, out_path):
     await edge_tts.Communicate(text, voice, rate=rate, **kw).save(out_path)
 
 
-def tts(text, voice, rate, out_path):
-    asyncio.run(_tts_one(text, voice, rate, out_path))
+def trim_silence(src, out_path, threshold="-45dB"):
+    """앞뒤 무음을 잘라낸다.
+
+    edge-tts가 내주는 mp3는 앞뒤에 0.5초 안팎의 빈 소리가 붙어 있다.
+    그대로 이어붙이면 컷마다 1초 넘게 말이 끊겨서 시청자가 바로 이탈한다.
+    앞을 자르고, 뒤집어서 다시 앞을 자른 뒤, 되돌리는 방식으로 양쪽을 없앤다.
+    """
+    one = (f"silenceremove=start_periods=1:start_duration=0:"
+           f"start_threshold={threshold}:detection=peak")
+    run(["-i", src, "-af", f"{one},areverse,{one},areverse",
+         "-ar", "44100", "-ac", "2", out_path])
     return probe_duration(out_path)
+
+
+def tts(text, voice, rate, out_path):
+    """나레이션을 합성하고 앞뒤 무음까지 제거한 wav 경로와 길이를 돌려준다."""
+    raw = out_path + ".raw.mp3"
+    asyncio.run(_tts_one(text, voice, rate, raw))
+    return trim_silence(raw, out_path)
 
 
 # ── 2) 장면 영상 ──────────────────────────────────────────────────────────────
@@ -112,11 +128,14 @@ def scene_video(src, duration, out_path, zoom_in=True, zoom_amount=0.14, fps=30)
 
 
 # ── 3) 장면 오디오 ────────────────────────────────────────────────────────────
-def scene_audio(mp3, duration, lead, out_path):
+def scene_audio(voice_wav, duration, lead, out_path):
     """나레이션 앞에 lead초 여백을 주고, 장면 길이만큼 무음으로 채운다."""
-    delay_ms = int(lead * 1000)
-    run(["-i", mp3,
-         "-af", f"adelay={delay_ms}|{delay_ms},apad,aformat=sample_fmts=s16:channel_layouts=stereo",
+    chain = []
+    if lead > 0:
+        delay_ms = int(lead * 1000)
+        chain.append(f"adelay={delay_ms}|{delay_ms}")
+    chain += ["apad", "aformat=sample_fmts=s16:channel_layouts=stereo"]
+    run(["-i", voice_wav, "-af", ",".join(chain),
          "-t", f"{duration:.3f}", "-ar", "44100", "-ac", "2", out_path])
 
 
@@ -163,8 +182,9 @@ def build_ass(cues, style, out_path):
 def build(spec, workdir):
     voice = spec.get("voice", "ko-KR-SunHiNeural")
     rate = spec.get("rate", "+15%")
-    gap = float(spec.get("gap", 0.30))       # 장면 사이 숨 쉬는 여백(초)
-    lead = float(spec.get("lead", 0.12))     # 컷 바뀌고 말이 시작될 때까지 여백(초)
+    # 쇼츠는 말이 끊기는 순간 이탈한다. 기본값은 거의 붙여 읽는 쪽으로 잡는다.
+    gap = float(spec.get("gap", 0.05))       # 장면 사이 여백(초)
+    lead = float(spec.get("lead", 0.0))      # 컷 바뀌고 말이 시작될 때까지 여백(초)
     style = spec.get("style", {})
     fps = int(spec.get("fps", 30))
     scenes = spec["scenes"]
@@ -172,10 +192,12 @@ def build(spec, workdir):
     seg_videos, seg_audios, cues = [], [], []
     t = 0.0
     for i, sc in enumerate(scenes):
-        mp3 = os.path.join(workdir, f"tts{i:02d}.mp3")
+        voice_wav = os.path.join(workdir, f"tts{i:02d}.wav")
         say = sc.get("say", sc["text"])       # 읽는 문장과 자막을 따로 둘 수 있다
-        dur_tts = tts(say, sc.get("voice", voice), sc.get("rate", rate), mp3)
-        dur = dur_tts + lead + gap
+        dur_tts = tts(say, sc.get("voice", voice), sc.get("rate", rate), voice_wav)
+        # 장면 길이를 프레임 단위로 딱 맞춘다. 안 맞추면 컷·음성·자막이 조금씩
+        # 어긋난 채로 쌓여서 뒤로 갈수록 자막이 밀린다.
+        dur = round((dur_tts + lead + gap) * fps) / fps
 
         v = os.path.join(workdir, f"v{i:02d}.mp4")
         scene_video(sc["src"], dur, v, zoom_in=(i % 2 == 0),
@@ -183,10 +205,11 @@ def build(spec, workdir):
         seg_videos.append(v)
 
         a = os.path.join(workdir, f"a{i:02d}.wav")
-        scene_audio(mp3, dur, lead, a)
+        scene_audio(voice_wav, dur, lead, a)
         seg_audios.append(a)
 
-        cues.append((t + lead, t + lead + dur_tts + 0.12, sc["text"]))
+        # 자막은 장면 전체를 덮는다. 말이 끝났다고 자막까지 지우면 화면이 빈다.
+        cues.append((t, t + dur, sc["text"]))
         t += dur
         print(f"  [{i + 1}/{len(scenes)}] {dur:4.2f}s  {sc['text']}")
 

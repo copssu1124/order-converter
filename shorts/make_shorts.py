@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+쇼핑쇼츠 자동 생성기 (1080x1920 / 9:16)
+
+스펙 JSON 하나를 받아서 아래를 자동으로 처리한다.
+  1) 장면별 나레이션을 TTS로 합성 (edge-tts, 무료)
+  2) 나레이션 길이에 맞춰 장면 길이를 자동 결정
+  3) 이미지/영상 소재를 9:16으로 채우고 줌 효과 부여
+  4) 흰 굵은 글씨 + 검은 외곽선 자막을 영상에 구움 (libass)
+  5) 나레이션을 합쳐 최종 mp4로 인코딩
+
+사용법:
+    python3 make_shorts.py 스펙파일.json
+
+필요한 것:  pip install edge-tts imageio-ffmpeg
+"""
+
+import asyncio
+import json
+import os
+import re
+import ssl
+import subprocess
+import sys
+import tempfile
+
+# ── 프록시 환경(사내망/컨테이너)에서 TTS가 인증서 오류로 막히는 경우 대비 ──────
+_CA_BUNDLE = os.environ.get("SHORTS_CA_BUNDLE") or "/root/.ccr/ca-bundle.crt"
+_PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+
+
+def ffmpeg_exe():
+    """ffmpeg 실행 파일 경로. 시스템에 없으면 imageio-ffmpeg 내장본을 쓴다."""
+    for cand in ("ffmpeg", "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg"):
+        try:
+            subprocess.run([cand, "-version"], capture_output=True, check=True)
+            return cand
+        except Exception:
+            pass
+    import imageio_ffmpeg
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
+FFMPEG = ffmpeg_exe()
+
+
+def run(args):
+    """ffmpeg 실행. 실패하면 에러 로그를 그대로 올린다."""
+    p = subprocess.run([FFMPEG, "-y", "-hide_banner", "-loglevel", "error"] + args,
+                       capture_output=True, text=True)
+    if p.returncode != 0:
+        raise RuntimeError("ffmpeg 실패\n" + " ".join(args) + "\n" + p.stderr[-3000:])
+
+
+def probe_duration(path):
+    """ffprobe 없이 ffmpeg 출력에서 재생 길이(초)를 읽는다."""
+    p = subprocess.run([FFMPEG, "-hide_banner", "-i", path],
+                       capture_output=True, text=True)
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.\d+)", p.stderr)
+    if not m:
+        raise RuntimeError("길이를 못 읽음: " + path)
+    h, mi, s = m.groups()
+    return int(h) * 3600 + int(mi) * 60 + float(s)
+
+
+# ── 1) TTS ────────────────────────────────────────────────────────────────────
+async def _tts_one(text, voice, rate, out_path):
+    import edge_tts
+    import edge_tts.communicate as _c
+    import edge_tts.voices as _v
+    if os.path.exists(_CA_BUNDLE):
+        ctx = ssl.create_default_context(cafile=_CA_BUNDLE)
+        _c._SSL_CTX = ctx
+        _v._SSL_CTX = ctx
+    kw = {"proxy": _PROXY} if _PROXY else {}
+    await edge_tts.Communicate(text, voice, rate=rate, **kw).save(out_path)
+
+
+def tts(text, voice, rate, out_path):
+    asyncio.run(_tts_one(text, voice, rate, out_path))
+    return probe_duration(out_path)
+
+
+# ── 2) 장면 영상 ──────────────────────────────────────────────────────────────
+def scene_video(src, duration, out_path, zoom_in=True, zoom_amount=0.14, fps=30):
+    """이미지 또는 동영상 한 컷을 1080x1920으로 만든다.
+
+    이미지면 천천히 줌(켄 번스), 동영상이면 필요한 구간만 잘라 9:16으로 채운다.
+    """
+    frames = max(2, int(round(duration * fps)))
+    is_video = os.path.splitext(src)[1].lower() in (".mp4", ".mov", ".mkv", ".webm", ".avi")
+
+    if is_video:
+        vf = (f"scale=1080:1920:force_original_aspect_ratio=increase,"
+              f"crop=1080:1920,fps={fps},setsar=1,format=yuv420p")
+        args = ["-stream_loop", "-1", "-i", src, "-t", f"{duration:.3f}", "-an", "-vf", vf]
+    else:
+        # 줌 화질 손실을 막으려고 2배로 키운 뒤 zoompan으로 잘라낸다.
+        k = zoom_amount / frames
+        if zoom_in:
+            z = f"min(1+{k:.8f}*on,{1 + zoom_amount:.4f})"
+        else:
+            z = f"max({1 + zoom_amount:.4f}-{k:.8f}*on,1.0)"
+        vf = (f"scale=2160:3840:force_original_aspect_ratio=increase,crop=2160:3840,"
+              f"zoompan=z='{z}':d=1:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+              f"s=1080x1920:fps={fps},setsar=1,format=yuv420p")
+        args = ["-loop", "1", "-framerate", str(fps), "-t", f"{duration:.3f}", "-i", src, "-vf", vf]
+
+    run(args + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                "-pix_fmt", "yuv420p", "-r", str(fps), out_path])
+
+
+# ── 3) 장면 오디오 ────────────────────────────────────────────────────────────
+def scene_audio(mp3, duration, lead, out_path):
+    """나레이션 앞에 lead초 여백을 주고, 장면 길이만큼 무음으로 채운다."""
+    delay_ms = int(lead * 1000)
+    run(["-i", mp3,
+         "-af", f"adelay={delay_ms}|{delay_ms},apad,aformat=sample_fmts=s16:channel_layouts=stereo",
+         "-t", f"{duration:.3f}", "-ar", "44100", "-ac", "2", out_path])
+
+
+# ── 4) 자막 ───────────────────────────────────────────────────────────────────
+ASS_HEADER = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 2
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Main,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,{outline},{shadow},2,50,50,{margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+
+
+def ass_time(t):
+    h = int(t // 3600)
+    m = int((t % 3600) // 60)
+    s = t % 60
+    return f"{h}:{m:02d}:{s:05.2f}"
+
+
+def build_ass(cues, style, out_path):
+    body = ASS_HEADER.format(
+        font=style.get("font", "Pretendard JJ"),
+        size=style.get("size", 64),
+        outline=style.get("outline", 5),
+        shadow=style.get("shadow", 2),
+        margin_v=style.get("margin_v", 520),
+    )
+    for start, end, text in cues:
+        text = text.replace("\n", "\\N")
+        body += f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Main,,0,0,0,,{text}\n"
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(body)
+
+
+# ── 5) 전체 조립 ──────────────────────────────────────────────────────────────
+def build(spec, workdir):
+    voice = spec.get("voice", "ko-KR-SunHiNeural")
+    rate = spec.get("rate", "+15%")
+    gap = float(spec.get("gap", 0.30))       # 장면 사이 숨 쉬는 여백(초)
+    lead = float(spec.get("lead", 0.12))     # 컷 바뀌고 말이 시작될 때까지 여백(초)
+    style = spec.get("style", {})
+    fps = int(spec.get("fps", 30))
+    scenes = spec["scenes"]
+
+    seg_videos, seg_audios, cues = [], [], []
+    t = 0.0
+    for i, sc in enumerate(scenes):
+        mp3 = os.path.join(workdir, f"tts{i:02d}.mp3")
+        say = sc.get("say", sc["text"])       # 읽는 문장과 자막을 따로 둘 수 있다
+        dur_tts = tts(say, sc.get("voice", voice), sc.get("rate", rate), mp3)
+        dur = dur_tts + lead + gap
+
+        v = os.path.join(workdir, f"v{i:02d}.mp4")
+        scene_video(sc["src"], dur, v, zoom_in=(i % 2 == 0),
+                    zoom_amount=float(sc.get("zoom", 0.14)), fps=fps)
+        seg_videos.append(v)
+
+        a = os.path.join(workdir, f"a{i:02d}.wav")
+        scene_audio(mp3, dur, lead, a)
+        seg_audios.append(a)
+
+        cues.append((t + lead, t + lead + dur_tts + 0.12, sc["text"]))
+        t += dur
+        print(f"  [{i + 1}/{len(scenes)}] {dur:4.2f}s  {sc['text']}")
+
+    # 영상 이어붙이기
+    lst = os.path.join(workdir, "v.txt")
+    with open(lst, "w") as f:
+        for p in seg_videos:
+            f.write(f"file '{p}'\n")
+    body = os.path.join(workdir, "body.mp4")
+    run(["-f", "concat", "-safe", "0", "-i", lst, "-c", "copy", body])
+
+    # 나레이션 이어붙이기
+    lst_a = os.path.join(workdir, "a.txt")
+    with open(lst_a, "w") as f:
+        for p in seg_audios:
+            f.write(f"file '{p}'\n")
+    narr = os.path.join(workdir, "narr.wav")
+    run(["-f", "concat", "-safe", "0", "-i", lst_a, "-c", "copy", narr])
+
+    # 자막 굽고 최종 인코딩
+    ass = os.path.join(workdir, "sub.ass")
+    build_ass(cues, style, ass)
+    fontsdir = style.get("fontsdir", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ui"))
+    vf = f"subtitles={ass}:fontsdir={os.path.abspath(fontsdir)}"
+
+    out = spec.get("output", "shorts_out.mp4")
+    run(["-i", body, "-i", narr, "-vf", vf,
+         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", out])
+    return out, t
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+    spec_path = sys.argv[1]
+    with open(spec_path, encoding="utf-8") as f:
+        spec = json.load(f)
+
+    # 스펙 파일 위치 기준으로 소재 경로를 푼다.
+    base = os.path.dirname(os.path.abspath(spec_path))
+    for sc in spec["scenes"]:
+        if not os.path.isabs(sc["src"]):
+            sc["src"] = os.path.join(base, sc["src"])
+
+    print(f"장면 {len(spec['scenes'])}개 렌더 시작")
+    with tempfile.TemporaryDirectory(prefix="shorts_") as wd:
+        out, total = build(spec, wd)
+    print(f"\n완료: {out}  ({total:.1f}초)")
+
+
+if __name__ == "__main__":
+    main()

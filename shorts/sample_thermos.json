@@ -1,0 +1,67 @@
+{
+  "output": "sample_thermos.mp4",
+  "voice": "ko-KR-SunHiNeural",
+  "rate": "+18%",
+  "gap": 0.26,
+  "lead": 0.1,
+  "fps": 30,
+  "style": {
+    "font": "Pretendard JJ",
+    "size": 92,
+    "outline": 7,
+    "shadow": 3,
+    "margin_v": 500
+  },
+  "scenes": [
+    {
+      "src": "assets/00.jpg",
+      "text": "캠핑 가서 커피 타면",
+      "zoom": 0.12
+    },
+    {
+      "src": "assets/11.jpg",
+      "text": "10분 만에 식어버리죠",
+      "zoom": 0.14
+    },
+    {
+      "src": "assets/02.jpg",
+      "text": "근데 이건 다릅니다",
+      "zoom": 0.16
+    },
+    {
+      "src": "assets/23.jpg",
+      "text": "6시간 뒤에 따라봤어요",
+      "zoom": 0.14
+    },
+    {
+      "src": "assets/01.jpg",
+      "text": "김이 그대로 올라와요",
+      "zoom": 0.12
+    },
+    {
+      "src": "assets/22.jpg",
+      "text": "가방 옆에 쏙 들어가고",
+      "zoom": 0.14
+    },
+    {
+      "src": "assets/21.jpg",
+      "text": "짐도 하나도 안 늘어나요",
+      "zoom": 0.12
+    },
+    {
+      "src": "assets/04.jpg",
+      "text": "둘이 마셔도 넉넉한 용량",
+      "zoom": 0.14
+    },
+    {
+      "src": "assets/20.jpg",
+      "text": "이번 주말 캠핑 전에",
+      "zoom": 0.12
+    },
+    {
+      "src": "assets/23.jpg",
+      "text": "지금 확인해보세요",
+      "zoom": 0.16
+    }
+  ]
+}

@@ -17,6 +17,10 @@ pip install edge-tts imageio-ffmpeg opencv-python-headless numpy
 맥(Apple Silicon 포함)·윈도우·리눅스 모두 같은 명령이다. ffmpeg는 `imageio-ffmpeg`가
 플랫폼에 맞는 바이너리를 자동으로 가져오므로 따로 설치하지 않는다.
 
+아래 명령의 `~/.claude/skills/shopping-shorts/scripts/` 는 맥·리눅스 기준이다.
+윈도우(PowerShell)에서는 `$HOME\.claude\skills\shopping-shorts\scripts\` 로 바꾸고,
+`python3` 대신 `python` 또는 `py` 를 쓴다.
+
 ## 전체 흐름
 
 1. **원본 확인** — 어디에 자막·워터마크가 있는지 먼저 눈으로 본다
@@ -30,7 +34,7 @@ pip install edge-tts imageio-ffmpeg opencv-python-headless numpy
 ## 1. 원본 확인
 
 ```bash
-python3 scripts/detect_subtitle.py 원본.mp4 --preview 확인.png
+python3 ~/.claude/skills/shopping-shorts/scripts/detect_subtitle.py 원본.mp4 --preview 확인.png
 ```
 
 `--preview`로 나온 png를 열어 빨간 상자(자막)와 노란 상자(워터마크)가 실제
@@ -96,7 +100,7 @@ BGM을 넣으려면 `"bgm": "음원.mp3"` 한 줄을 추가한다. 말할 때 �
 ## 4. 렌더
 
 ```bash
-python3 scripts/make_shorts.py 스펙.json
+python3 ~/.claude/skills/shopping-shorts/scripts/make_shorts.py 스펙.json
 ```
 
 ## 5. 검증 — 반드시 한다
@@ -146,7 +150,7 @@ ffmpeg -i 결과.mp4 -af ebur128 -f null -
 닮고 싶은 쇼츠가 있으면 감으로 맞추지 말고 잰다.
 
 ```bash
-python3 scripts/analyze_reference.py 레퍼런스1.mp4 레퍼런스2.mp4 ...
+python3 ~/.claude/skills/shopping-shorts/scripts/analyze_reference.py 레퍼런스1.mp4 레퍼런스2.mp4 ...
 ```
 
 컷 길이·자막 위치·글자 크기·움직임량을 재서 스펙에 넣을 `style` 블록을 내준다.

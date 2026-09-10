@@ -22,3 +22,6 @@ __pycache__/
 
 # 민감 파일 (절대 커밋 금지)
 github-recovery-codes.txt
+.shorts-upload/
+*.session.json
+.env

@@ -491,13 +491,41 @@ def build(spec, workdir):
     # 음량 맞추기. 그냥 뽑으면 -17 LUFS 안팎으로 나와서 실제 인기 쇼츠(-6~-14)보다
     # 확연히 작게 들린다. loudnorm으로 목표 음량까지 끌어올린다.
     lufs = float(spec.get("loudness", -12))
-    af = f"loudnorm=I={lufs}:TP=-1.5:LRA=11"
+    norm = f"loudnorm=I={lufs}:TP=-1.5:LRA=11"
 
     out = spec.get("output", "shorts_out.mp4")
-    run(["-i", body, "-i", narr, "-vf", vf, "-af", af,
-         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-         "-c:a", "aac", "-b:a", "160k", "-ar", "44100",
-         "-shortest", "-movflags", "+faststart", out])
+    bgm = spec.get("bgm")
+    if bgm and os.path.exists(bgm):
+        # BGM은 나레이션이 나올 때 자동으로 작아진다(사이드체인 더킹).
+        # 깔아만 두면 말소리를 잡아먹고, 안 깔면 말 사이가 허전하다.
+        gain = float(spec.get("bgm_volume", 0.22))
+        fade = float(spec.get("bgm_fade", 0.6))
+        duck = spec.get("bgm_duck", True)
+        chain = [
+            f"[2:a]volume={gain},afade=t=in:st=0:d={fade},"
+            f"afade=t=out:st={max(0.0, t - fade):.2f}:d={fade},"
+            f"aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo[bg]"
+        ]
+        if duck:
+            chain.insert(0, "[1:a]asplit=2[nar][key]")
+            chain.append("[bg][key]sidechaincompress="
+                         "threshold=0.02:ratio=12:attack=15:release=300:makeup=1[duck]")
+            mix_in = "[nar][duck]"
+        else:
+            chain.insert(0, "[1:a]anull[nar]")
+            mix_in = "[nar][bg]"
+        chain.append(f"{mix_in}amix=inputs=2:duration=first:normalize=0,{norm}[aout]")
+        fc = f"[0:v]{vf}[vout];" + ";".join(chain)
+        run(["-i", body, "-i", narr, "-stream_loop", "-1", "-i", bgm,
+             "-filter_complex", fc, "-map", "[vout]", "-map", "[aout]",
+             "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-b:a", "160k", "-ar", "44100",
+             "-t", f"{t:.3f}", "-movflags", "+faststart", out])
+    else:
+        run(["-i", body, "-i", narr, "-vf", vf, "-af", norm,
+             "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-b:a", "160k", "-ar", "44100",
+             "-shortest", "-movflags", "+faststart", out])
     return out, t
 
 

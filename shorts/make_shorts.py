@@ -99,16 +99,87 @@ def tts(text, voice, rate, out_path):
 
 
 # ── 2) 장면 영상 ──────────────────────────────────────────────────────────────
-def scene_video(src, duration, out_path, zoom_in=True, zoom_amount=0.14, fps=30):
+VIDEO_EXT = (".mp4", ".mov", ".mkv", ".webm", ".avi")
+
+_MASK_CACHE = {}
+
+
+def auto_regions(src):
+    """원본에 박힌 자막·워터마크 위치를 자동으로 찾는다 (같은 파일은 한 번만)."""
+    if src in _MASK_CACHE:
+        return _MASK_CACHE[src]
+    try:
+        from detect_subtitle import detect
+    except ImportError:
+        import os as _os, sys as _sys
+        _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+        from detect_subtitle import detect
+    found = detect(src).get("regions", [])
+    _MASK_CACHE[src] = found
+    for r in found:
+        print(f"      가림: {r['zone']} x={r['x']} y={r['y']} {r['w']}x{r['h']}")
+    return found
+
+
+def mask_filter(regions, mode="blur", strength=28):
+    """원본 위의 지정 영역을 가리는 필터 문자열을 만든다.
+
+    blur = 뭉갠다(자연스러움) / box = 검은 상자로 덮는다(확실함)
+    """
+    if not regions:
+        return ""
+    if mode == "box":
+        return ",".join(
+            f"drawbox=x={r['x']}:y={r['y']}:w={r['w']}:h={r['h']}:color=black@1:t=fill"
+            for r in regions)
+
+    # 워터마크처럼 작은 것은 delogo가 주변 화면을 끌어와 메워서 훨씬 덜 티난다.
+    # 자막 띠처럼 큰 것은 delogo가 뭉개지므로 블러로 처리한다.
+    small = [r for r in regions if r["w"] * r["h"] < 1080 * 1920 * 0.03]
+    big = [r for r in regions if r not in small]
+    head_chain = ",".join(
+        f"delogo=x={max(1, r['x'])}:y={max(1, r['y'])}:w={r['w']}:h={r['h']}"
+        for r in small)
+
+    if not big:
+        return head_chain
+    parts, cur = [], None
+    for i, r in enumerate(big):
+        a, b, c = f"bg{i}", f"rg{i}", f"bl{i}"
+        head = f"[{cur}]" if cur else ""
+        parts.append(f"{head}split=2[{a}][{b}]")
+        # boxblur 반경은 잘라낸 영역 크기를 넘을 수 없다(색차 평면 기준). 맞춰 줄인다.
+        radius = max(2, min(strength, min(r["w"], r["h"]) // 4))
+        parts.append(f"[{b}]crop={r['w']}:{r['h']}:{r['x']}:{r['y']},"
+                     f"boxblur={radius}:2,gblur=sigma={max(6, strength)}[{c}]")
+        cur = f"ov{i}"
+        parts.append(f"[{a}][{c}]overlay={r['x']}:{r['y']}[{cur}]")
+    chain = ";".join(parts) + f";[{cur}]null"
+    return (head_chain + "," + chain) if head_chain else chain
+
+
+def scene_video(src, duration, out_path, zoom_in=True, zoom_amount=0.14, fps=30,
+                mask=None):
     """이미지 또는 동영상 한 컷을 1080x1920으로 만든다.
 
     이미지면 천천히 줌(켄 번스), 동영상이면 필요한 구간만 잘라 9:16으로 채운다.
     """
     frames = max(2, int(round(duration * fps)))
-    is_video = os.path.splitext(src)[1].lower() in (".mp4", ".mov", ".mkv", ".webm", ".avi")
+    is_video = os.path.splitext(src)[1].lower() in VIDEO_EXT
+
+    # 원본에 박힌 자막·워터마크 가리기 (9:16으로 자르기 전에, 원본 좌표로 처리)
+    pre = ""
+    if mask:
+        regions = mask.get("regions")
+        if regions in ("auto", None):
+            regions = auto_regions(src)
+        pre = mask_filter(regions, mask.get("mode", "blur"),
+                          int(mask.get("strength", 28)))
+        if pre:
+            pre += ","
 
     if is_video:
-        vf = (f"scale=1080:1920:force_original_aspect_ratio=increase,"
+        vf = (f"{pre}scale=1080:1920:force_original_aspect_ratio=increase,"
               f"crop=1080:1920,fps={fps},setsar=1,format=yuv420p")
         args = ["-stream_loop", "-1", "-i", src, "-t", f"{duration:.3f}", "-an", "-vf", vf]
     else:
@@ -189,6 +260,23 @@ def build(spec, workdir):
     fps = int(spec.get("fps", 30))
     scenes = spec["scenes"]
 
+    # 원본 자막이 있던 자리에 한글 자막을 얹으면, 가리느라 생긴 자국이 글자에
+    # 덮여서 훨씬 덜 티난다. margin_v를 "auto"로 두면 그 위치를 자동으로 맞춘다.
+    if str(style.get("margin_v", "")).lower() == "auto":
+        band = None
+        for sc in scenes:
+            if os.path.splitext(sc["src"])[1].lower() not in VIDEO_EXT:
+                continue
+            if not sc.get("mask", spec.get("mask")):
+                continue
+            for r in auto_regions(sc["src"]):
+                if r["zone"] == "하단" and (band is None or r["h"] > band["h"]):
+                    band = r
+            break
+        style = dict(style)
+        style["margin_v"] = max(140, 1920 - (band["y"] + band["h"])) if band else 500
+        print(f"      자막 위치 자동: 아래에서 {style['margin_v']}px")
+
     seg_videos, seg_audios, cues = [], [], []
     t = 0.0
     for i, sc in enumerate(scenes):
@@ -200,8 +288,12 @@ def build(spec, workdir):
         dur = round((dur_tts + lead + gap) * fps) / fps
 
         v = os.path.join(workdir, f"v{i:02d}.mp4")
+        scene_mask = sc.get("mask", spec.get("mask"))
+        if scene_mask in ("auto", True):
+            scene_mask = {"regions": "auto"}
         scene_video(sc["src"], dur, v, zoom_in=(i % 2 == 0),
-                    zoom_amount=float(sc.get("zoom", 0.14)), fps=fps)
+                    zoom_amount=float(sc.get("zoom", 0.14)), fps=fps,
+                    mask=scene_mask)
         seg_videos.append(v)
 
         a = os.path.join(workdir, f"a{i:02d}.wav")

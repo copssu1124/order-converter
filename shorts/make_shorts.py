@@ -382,6 +382,9 @@ def build(spec, workdir):
     fps = int(spec.get("fps", 30))
     scenes = spec["scenes"]
     lively = bool(spec.get("lively", True))   # 원본에서 활발한 구간을 골라 쓴다
+    # 잘 나가는 쇼츠는 컷이 0.9초 안팎으로 넘어간다. 대사 한 줄이 그보다 길면
+    # 그 안에서 화면만 여러 번 갈아 끼운다. 자막과 나레이션은 그대로 이어진다.
+    max_cut = float(spec.get("max_cut", 0.9))
 
     # 원본 자막이 있던 자리에 한글 자막을 얹으면, 가리느라 생긴 자국이 글자에
     # 덮여서 훨씬 덜 티난다. margin_v를 "auto"로 두면 그 위치를 자동으로 맞춘다.
@@ -411,31 +414,42 @@ def build(spec, workdir):
         # 어긋난 채로 쌓여서 뒤로 갈수록 자막이 밀린다.
         dur = round((dur_tts + lead + gap) * fps) / fps
 
-        v = os.path.join(workdir, f"v{i:02d}.mp4")
         scene_mask = sc.get("mask", spec.get("mask"))
         if scene_mask in ("auto", True):
             scene_mask = {"regions": "auto"}
 
-        # 영상 소재는 장면마다 원본의 다음 구간을 쓴다.
-        # 전부 0초부터 재생하면 같은 그림이 반복돼 정지 화면처럼 보인다.
         src = sc["src"]
-        start, slen = 0.0, None
-        if os.path.splitext(src)[1].lower() in VIDEO_EXT:
-            slen = src_duration(src)
-            if "in" in sc:
-                start = float(sc["in"])
-            elif lively:
-                start = pick_lively(src, dur, slen)
-            else:
-                start = cursor.get(src, 0.0)
-            if slen and start >= slen:
-                start = start % slen
-            cursor[src] = start + dur
+        is_vid = os.path.splitext(src)[1].lower() in VIDEO_EXT
+        slen = src_duration(src) if is_vid else None
 
-        scene_video(src, dur, v, zoom_in=(i % 2 == 0),
-                    zoom_amount=float(sc.get("zoom", 0.14)), fps=fps,
-                    mask=scene_mask, start=start, src_len=slen)
-        seg_videos.append(v)
+        # 대사 길이를 컷 여러 개로 쪼갠다 (프레임 수로 나눠 오차가 안 쌓이게).
+        total_f = int(round(dur * fps))
+        n_sub = max(1, int(round(dur / max_cut))) if is_vid else 1
+        n_sub = min(n_sub, max(1, total_f // 6))          # 너무 잘게 쪼개지 않는다
+        base, extra = divmod(total_f, n_sub)
+        starts = []
+        for k in range(n_sub):
+            sub_f = base + (1 if k < extra else 0)
+            sub_d = sub_f / fps
+            v = os.path.join(workdir, f"v{i:02d}_{k}.mp4")
+            if is_vid:
+                if "in" in sc and k == 0:
+                    st = float(sc["in"])
+                elif lively:
+                    st = pick_lively(src, sub_d, slen)
+                else:
+                    st = cursor.get(src, 0.0)
+                if slen and st >= slen:
+                    st = st % slen
+                cursor[src] = st + sub_d
+            else:
+                st = 0.0
+            starts.append(st)
+            scene_video(src, sub_d, v, zoom_in=((i + k) % 2 == 0),
+                        zoom_amount=float(sc.get("zoom", 0.14)), fps=fps,
+                        mask=scene_mask, start=st, src_len=slen)
+            seg_videos.append(v)
+        start = starts[0]
 
         a = os.path.join(workdir, f"a{i:02d}.wav")
         scene_audio(voice_wav, dur, lead, a)
@@ -449,7 +463,7 @@ def build(spec, workdir):
                 align, mv = got
         cues.append((t, t + dur, sc["text"], align, mv))
         t += dur
-        where = f"  ({start:5.2f}s~)" if slen else ""
+        where = ("  컷%d개 @ " % n_sub) + " ".join(f"{x:.1f}s" for x in starts) if slen else ""
         print(f"  [{i + 1}/{len(scenes)}] {dur:4.2f}s{where}  {sc['text']}")
 
     # 영상 이어붙이기

@@ -102,6 +102,17 @@ def tts(text, voice, rate, out_path):
 VIDEO_EXT = (".mp4", ".mov", ".mkv", ".webm", ".avi")
 
 _MASK_CACHE = {}
+_LEN_CACHE = {}
+
+
+def src_duration(path):
+    """원본 영상 길이(초). 같은 파일은 한 번만 잰다."""
+    if path not in _LEN_CACHE:
+        try:
+            _LEN_CACHE[path] = probe_duration(path)
+        except Exception:
+            _LEN_CACHE[path] = 0.0
+    return _LEN_CACHE[path]
 
 
 def auto_regions(src):
@@ -159,7 +170,7 @@ def mask_filter(regions, mode="blur", strength=28):
 
 
 def scene_video(src, duration, out_path, zoom_in=True, zoom_amount=0.14, fps=30,
-                mask=None):
+                mask=None, start=0.0, src_len=None):
     """이미지 또는 동영상 한 컷을 1080x1920으로 만든다.
 
     이미지면 천천히 줌(켄 번스), 동영상이면 필요한 구간만 잘라 9:16으로 채운다.
@@ -181,7 +192,13 @@ def scene_video(src, duration, out_path, zoom_in=True, zoom_amount=0.14, fps=30,
     if is_video:
         vf = (f"{pre}scale=1080:1920:force_original_aspect_ratio=increase,"
               f"crop=1080:1920,fps={fps},setsar=1,format=yuv420p")
-        args = ["-stream_loop", "-1", "-i", src, "-t", f"{duration:.3f}", "-an", "-vf", vf]
+        args = []
+        if start > 0:
+            args += ["-ss", f"{start:.3f}"]
+        # 남은 길이가 모자랄 때만 원본을 되감아 이어 붙인다.
+        if src_len and start + duration > src_len:
+            args = ["-stream_loop", "-1"] + args
+        args += ["-i", src, "-t", f"{duration:.3f}", "-an", "-vf", vf]
     else:
         # 줌 화질 손실을 막으려고 2배로 키운 뒤 zoompan으로 잘라낸다.
         k = zoom_amount / frames
@@ -278,6 +295,7 @@ def build(spec, workdir):
         print(f"      자막 위치 자동: 아래에서 {style['margin_v']}px")
 
     seg_videos, seg_audios, cues = [], [], []
+    cursor = {}          # 원본별로 어디까지 썼는지 (장면마다 다른 구간을 쓰게 한다)
     t = 0.0
     for i, sc in enumerate(scenes):
         voice_wav = os.path.join(workdir, f"tts{i:02d}.wav")
@@ -291,9 +309,21 @@ def build(spec, workdir):
         scene_mask = sc.get("mask", spec.get("mask"))
         if scene_mask in ("auto", True):
             scene_mask = {"regions": "auto"}
-        scene_video(sc["src"], dur, v, zoom_in=(i % 2 == 0),
+
+        # 영상 소재는 장면마다 원본의 다음 구간을 쓴다.
+        # 전부 0초부터 재생하면 같은 그림이 반복돼 정지 화면처럼 보인다.
+        src = sc["src"]
+        start, slen = 0.0, None
+        if os.path.splitext(src)[1].lower() in VIDEO_EXT:
+            slen = src_duration(src)
+            start = float(sc["in"]) if "in" in sc else cursor.get(src, 0.0)
+            if slen and start >= slen:
+                start = start % slen
+            cursor[src] = start + dur
+
+        scene_video(src, dur, v, zoom_in=(i % 2 == 0),
                     zoom_amount=float(sc.get("zoom", 0.14)), fps=fps,
-                    mask=scene_mask)
+                    mask=scene_mask, start=start, src_len=slen)
         seg_videos.append(v)
 
         a = os.path.join(workdir, f"a{i:02d}.wav")
@@ -303,7 +333,8 @@ def build(spec, workdir):
         # 자막은 장면 전체를 덮는다. 말이 끝났다고 자막까지 지우면 화면이 빈다.
         cues.append((t, t + dur, sc["text"]))
         t += dur
-        print(f"  [{i + 1}/{len(scenes)}] {dur:4.2f}s  {sc['text']}")
+        where = f"  ({start:5.2f}s~)" if slen else ""
+        print(f"  [{i + 1}/{len(scenes)}] {dur:4.2f}s{where}  {sc['text']}")
 
     # 영상 이어붙이기
     lst = os.path.join(workdir, "v.txt")

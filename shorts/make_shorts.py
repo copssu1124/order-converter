@@ -488,10 +488,16 @@ def build(spec, workdir):
     fontsdir = style.get("fontsdir", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ui"))
     vf = f"subtitles={ass}:fontsdir={os.path.abspath(fontsdir)}"
 
+    # 음량 맞추기. 그냥 뽑으면 -17 LUFS 안팎으로 나와서 실제 인기 쇼츠(-6~-14)보다
+    # 확연히 작게 들린다. loudnorm으로 목표 음량까지 끌어올린다.
+    lufs = float(spec.get("loudness", -12))
+    af = f"loudnorm=I={lufs}:TP=-1.5:LRA=11"
+
     out = spec.get("output", "shorts_out.mp4")
-    run(["-i", body, "-i", narr, "-vf", vf,
+    run(["-i", body, "-i", narr, "-vf", vf, "-af", af,
          "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-         "-c:a", "aac", "-b:a", "128k", "-shortest", "-movflags", "+faststart", out])
+         "-c:a", "aac", "-b:a", "160k", "-ar", "44100",
+         "-shortest", "-movflags", "+faststart", out])
     return out, t
 
 

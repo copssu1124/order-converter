@@ -115,6 +115,79 @@ def src_duration(path):
     return _LEN_CACHE[path]
 
 
+_SIZE_CACHE = {}
+
+
+def frame_size(path):
+    """원본 가로x세로. 같은 파일은 한 번만 잰다."""
+    if path not in _SIZE_CACHE:
+        p = subprocess.run([FFMPEG, "-hide_banner", "-i", path],
+                           capture_output=True, text=True)
+        m = re.search(r"Video:.*?(\d{2,5})x(\d{2,5})", p.stderr)
+        _SIZE_CACHE[path] = (int(m.group(1)), int(m.group(2))) if m else (1080, 1920)
+    return _SIZE_CACHE[path]
+
+
+_MOTION_CACHE = {}
+_USED_RANGES = {}
+
+
+def motion_profile(src, step=6, size=(160, 288)):
+    """초 단위 움직임량 곡선을 만든다. 값이 클수록 화면이 활발하다."""
+    if src in _MOTION_CACHE:
+        return _MOTION_CACHE[src]
+    import cv2
+    import numpy as np
+    cap = cv2.VideoCapture(src)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    times, vals, prev, idx = [], [], None, 0
+    while True:
+        ok = cap.grab()
+        if not ok:
+            break
+        if idx % step == 0:
+            ok, f = cap.retrieve()
+            if ok:
+                g = cv2.cvtColor(cv2.resize(f, size), cv2.COLOR_BGR2GRAY).astype("float32")
+                if prev is not None:
+                    times.append(idx / fps)
+                    vals.append(float(np.abs(g - prev).mean()))
+                prev = g
+        idx += 1
+    cap.release()
+    prof = (np.array(times), np.array(vals)) if vals else (np.array([0.0]), np.array([0.0]))
+    _MOTION_CACHE[src] = prof
+    return prof
+
+
+def pick_lively(src, duration, total, guard=0.35):
+    """원본에서 움직임이 가장 활발하면서 아직 안 쓴 구간의 시작 지점을 고른다.
+
+    앞에서부터 순서대로 자르면 정적인 구간까지 그대로 들어가 결과가 밋밋해진다.
+    """
+    import numpy as np
+    times, vals = motion_profile(src)
+    if len(vals) < 4 or total <= duration:
+        return 0.0
+    used = _USED_RANGES.setdefault(src, [])
+    best, best_score = None, -1.0
+    for i, t0 in enumerate(times):
+        if t0 + duration > total:
+            break
+        sel = (times >= t0) & (times < t0 + duration)
+        if not sel.any():
+            continue
+        if any(t0 < u1 + guard and u0 - guard < t0 + duration for u0, u1 in used):
+            continue
+        score = float(vals[sel].mean())
+        if score > best_score:
+            best, best_score = float(t0), score
+    if best is None:
+        return (used[-1][1] if used else 0.0) % max(0.1, total - duration)
+    used.append((best, best + duration))
+    return best
+
+
 def auto_regions(src):
     """원본에 박힌 자막·워터마크 위치를 자동으로 찾는다 (같은 파일은 한 번만)."""
     if src in _MASK_CACHE:
@@ -132,7 +205,7 @@ def auto_regions(src):
     return found
 
 
-def mask_filter(regions, mode="blur", strength=28):
+def mask_filter(regions, mode="blur", strength=28, frame_w=1080, frame_h=1920):
     """원본 위의 지정 영역을 가리는 필터 문자열을 만든다.
 
     blur = 뭉갠다(자연스러움) / box = 검은 상자로 덮는다(확실함)
@@ -146,7 +219,11 @@ def mask_filter(regions, mode="blur", strength=28):
 
     # 워터마크처럼 작은 것은 delogo가 주변 화면을 끌어와 메워서 훨씬 덜 티난다.
     # 자막 띠처럼 큰 것은 delogo가 뭉개지므로 블러로 처리한다.
-    small = [r for r in regions if r["w"] * r["h"] < 1080 * 1920 * 0.03]
+    # delogo는 작은 로고를 주변 화면으로 메우는 필터다. 자막처럼 넓은 띠에 쓰면
+    # 오히려 길게 번져 보이므로, 진짜 작은 표식에만 쓴다.
+    area = frame_w * frame_h
+    small = [r for r in regions
+             if r["w"] * r["h"] < area * 0.015 and r["w"] < frame_w * 0.35]
     big = [r for r in regions if r not in small]
     head_chain = ",".join(
         f"delogo=x={max(1, r['x'])}:y={max(1, r['y'])}:w={r['w']}:h={r['h']}"
@@ -184,8 +261,9 @@ def scene_video(src, duration, out_path, zoom_in=True, zoom_amount=0.14, fps=30,
         regions = mask.get("regions")
         if regions in ("auto", None):
             regions = auto_regions(src)
+        fw, fh = frame_size(src)
         pre = mask_filter(regions, mask.get("mode", "blur"),
-                          int(mask.get("strength", 28)))
+                          int(mask.get("strength", 28)), fw, fh)
         if pre:
             pre += ","
 
@@ -237,7 +315,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Main,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,{outline},{shadow},2,50,50,{margin_v},1
+Style: Main,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,{back},-1,0,0,0,100,100,0,0,{border_style},{outline},{shadow},2,50,50,{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -251,17 +329,44 @@ def ass_time(t):
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
+def place_from_regions(regions, frame_h, out_h=1920):
+    """원본 자막이 있던 자리에 한글 자막을 놓기 위한 (정렬, 여백)을 구한다.
+
+    원본 자막이 위에 있으면 위에, 아래에 있으면 아래에 얹는다.
+    그래야 가리느라 생긴 자국이 새 글자에 덮인다.
+    """
+    bands = [r for r in regions if r.get("score")]        # 자막 띠만 (워터마크 제외)
+    if not bands:
+        return None
+    b = max(bands, key=lambda r: r["score"])
+    top = b["y"] / frame_h
+    bottom = (b["y"] + b["h"]) / frame_h
+    if (top + bottom) / 2 < 0.5:
+        return 8, max(60, int(top * out_h))              # 위쪽 정렬, 위에서부터 여백
+    return 2, max(60, int((1 - bottom) * out_h))          # 아래쪽 정렬, 아래에서부터 여백
+
+
 def build_ass(cues, style, out_path):
+    # box=true 면 글자 뒤에 검은 반투명 판을 깐다(외곽선 대신).
+    # 배경이 복잡한 영상 위에서 글자가 훨씬 잘 읽힌다.
+    box = bool(style.get("box"))
     body = ASS_HEADER.format(
         font=style.get("font", "Pretendard JJ"),
         size=style.get("size", 64),
-        outline=style.get("outline", 5),
-        shadow=style.get("shadow", 2),
+        outline=style.get("pad", 16) if box else style.get("outline", 5),
+        shadow=0 if box else style.get("shadow", 2),
+        border_style=3 if box else 1,
+        back=style.get("box_color", "&H73000000") if box else "&H64000000",
         margin_v=style.get("margin_v", 520),
     )
-    for start, end, text in cues:
+    for cue in cues:
+        start, end, text = cue[0], cue[1], cue[2]
+        align = cue[3] if len(cue) > 3 and cue[3] else None
+        mv = cue[4] if len(cue) > 4 and cue[4] else 0
         text = text.replace("\n", "\\N")
-        body += f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Main,,0,0,0,,{text}\n"
+        tag = f"{{\\an{align}}}" if align else ""
+        body += (f"Dialogue: 0,{ass_time(start)},{ass_time(end)},Main,,0,0,"
+                 f"{int(mv)},,{tag}{text}\n")
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(body)
 
@@ -276,10 +381,12 @@ def build(spec, workdir):
     style = spec.get("style", {})
     fps = int(spec.get("fps", 30))
     scenes = spec["scenes"]
+    lively = bool(spec.get("lively", True))   # 원본에서 활발한 구간을 골라 쓴다
 
     # 원본 자막이 있던 자리에 한글 자막을 얹으면, 가리느라 생긴 자국이 글자에
     # 덮여서 훨씬 덜 티난다. margin_v를 "auto"로 두면 그 위치를 자동으로 맞춘다.
-    if str(style.get("margin_v", "")).lower() == "auto":
+    auto_place = str(style.get("margin_v", "")).lower() == "auto"
+    if auto_place:
         band = None
         for sc in scenes:
             if os.path.splitext(sc["src"])[1].lower() not in VIDEO_EXT:
@@ -291,8 +398,7 @@ def build(spec, workdir):
                     band = r
             break
         style = dict(style)
-        style["margin_v"] = max(140, 1920 - (band["y"] + band["h"])) if band else 500
-        print(f"      자막 위치 자동: 아래에서 {style['margin_v']}px")
+        style["margin_v"] = 400          # 컷마다 따로 지정하므로 기본값만 둔다
 
     seg_videos, seg_audios, cues = [], [], []
     cursor = {}          # 원본별로 어디까지 썼는지 (장면마다 다른 구간을 쓰게 한다)
@@ -316,7 +422,12 @@ def build(spec, workdir):
         start, slen = 0.0, None
         if os.path.splitext(src)[1].lower() in VIDEO_EXT:
             slen = src_duration(src)
-            start = float(sc["in"]) if "in" in sc else cursor.get(src, 0.0)
+            if "in" in sc:
+                start = float(sc["in"])
+            elif lively:
+                start = pick_lively(src, dur, slen)
+            else:
+                start = cursor.get(src, 0.0)
             if slen and start >= slen:
                 start = start % slen
             cursor[src] = start + dur
@@ -331,7 +442,12 @@ def build(spec, workdir):
         seg_audios.append(a)
 
         # 자막은 장면 전체를 덮는다. 말이 끝났다고 자막까지 지우면 화면이 빈다.
-        cues.append((t, t + dur, sc["text"]))
+        align = mv = None
+        if auto_place and slen:
+            got = place_from_regions(_MASK_CACHE.get(src, []), frame_size(src)[1])
+            if got:
+                align, mv = got
+        cues.append((t, t + dur, sc["text"], align, mv))
         t += dur
         where = f"  ({start:5.2f}s~)" if slen else ""
         print(f"  [{i + 1}/{len(scenes)}] {dur:4.2f}s{where}  {sc['text']}")

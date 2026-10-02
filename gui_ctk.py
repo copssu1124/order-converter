@@ -139,7 +139,8 @@ class _Slot:
         lab = ctk.CTkFrame(mid, fg_color="transparent")
         lab.pack(anchor="w")
         ctk.CTkLabel(lab, text=label + "  ", font=app.f(12), text_color=SUB).pack(side="left")
-        ctk.CTkLabel(lab, text=req, font=app.f(12, "bold"), text_color=REQ if req == "필수" else OPT).pack(side="left")
+        self.req = ctk.CTkLabel(lab, text=req, font=app.f(12, "bold"), text_color=REQ if req == "필수" else OPT)
+        self.req.pack(side="left")
         self.sub = ctk.CTkLabel(lab, text="", font=app.f(12), text_color=BRAND)
         self.sub.pack(side="left", padx=(8, 0))
         self.name = ctk.CTkLabel(mid, text=placeholder, font=app.f(14), text_color=FAINT)
@@ -1106,6 +1107,8 @@ class App(ctk.CTk):
         self.btn_erp.set_enabled(ok and not self._busy)
         if not self._busy:
             self.btn_erp.set_text(self._erp_btn_text())
+        jj = self._erp_jj()                                   # 제이제이 기준은 주문서를 쓰지 않음
+        self.erp_slots["order"].req.configure(text="사용 안 함" if jj else "필수", text_color=OPT if jj else REQ)
         jay_ok = self.erp_files.get("purchase") and not self._busy and not self._erp_jj()      # 제이 품목거래는 아이스앤팩 전용
         self.btn_jay_w.configure(state="normal" if jay_ok else "disabled")
 

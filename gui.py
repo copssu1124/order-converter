@@ -21,7 +21,7 @@ import tkinter.font as tkfont
 import step3_convert as engine
 import jj_convert   # 2차 재변환(수정데이터) — 색상 보존형
 
-VERSION = "7.1"                 # ★ 버전은 이 한 곳에서만 관리 (gui_ctk.py 도 여기서 읽음)
+VERSION = "7.2"                 # ★ 버전은 이 한 곳에서만 관리 (gui_ctk.py 도 여기서 읽음)
 KAKAO = "https://open.kakao.com/o/gyxhX4zi"
 CREDIT = "Developed by JANG JUNG WOO · JJ COMPANY"
 GITHUB_REPO = "copssu1124/order-converter"
@@ -64,7 +64,7 @@ def _버전튜플(s):
     try:
         s = str(s).strip().lstrip("vV")
         parts = re.findall(r"\d+", s)
-        return tuple(int(x) for x in parts[:2]) if parts else None
+        return tuple((int(x) for x in parts[:3])) + (0,) * (3 - len(parts[:3])) if parts else None   # 7.2 → (7,2,0), 7.2.1 → (7,2,1)
     except Exception:
         return None
 
@@ -1259,7 +1259,7 @@ class ConverterApp:
                     dl = a.get("browser_download_url")
                     break
             if 최신 and 현재 and 최신 > 현재:
-                disp = "%d.%d" % 최신
+                disp = ".".join(str(x) for x in (최신 if 최신[2] else 최신[:2]))
                 self.root.after(0, lambda: (self._setver("v%s 있음" % disp, AC2),
                                             self._update_popup(disp, dl)))
             else:

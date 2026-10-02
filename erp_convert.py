@@ -502,7 +502,8 @@ def _add_service_rows(t, service_total, order_count):
         return
     if brand == '다모아':
         if re.match(r'^청년몰-제이무역\s+(스토어|쿠팡)/다모아$', t['remark']):
-            _service(t['items'], '다모아 택배&외박스', CODE_DAMOA_SHIP, service_total, 1.0)   # 구매 단가 1 (직원 요청 2026-10-02, 판매는 아래에서 항상 0)
+            # 제이무역 …/다모아 만 단가 0 (금액은 '청년몰-다모아 천막택배비*' 거래로 따로 올라감). 그 외 다모아 구매는 단가 1
+            _service(t['items'], '다모아 택배&외박스', CODE_DAMOA_SHIP, service_total, 0.0)
         elif re.match(r'^청년몰-다모아\s+개인/', t['remark']):
             _service(t['items'], '다모아 택배&외박스', CODE_DAMOA_SHIP, None, 1.0, supply=service_total)
         else:

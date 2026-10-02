@@ -42,6 +42,7 @@ SENDERS = ["제이제이컴퍼니", "아이스앤팩", "다다쇼핑", "다모�
 COMPANIES = ["제이제이컴퍼니(유)", "본사"]       # 매입·매출 집계 파일 A열에 표기할 회사명 (선택 안 하면 기존 방식)
 ERP_DIR = os.path.join(getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file__)), "erp")   # 번들 양식·기본 단가표
 LEDGER_OWNERS = (("damoa", "다모아"), ("jj", "제이제이"), ("trade", "제이무역"))
+ERP_MODES = ("아이스앤팩", "제이제이")      # ERP 등록 기준: 아이스앤팩(청년몰 원장 비교 포함) / 제이제이(매입·매출만으로 일괄등록)
 
 HELP_SECTIONS = [
     ("주문서 변환",
@@ -64,7 +65,8 @@ HELP_SECTIONS = [
      "· ERP_판매구매일괄등록.xls — ERP 대량등록 양식. 구매(청년몰-제이/다모아/제이무역)와 판매(스마트스토어/쿠팡)가 적요별로 짝지어 들어갑니다.\n"
      "  ERP에 올릴 때 '행 범위' 시작을 3으로 바꾸세요(1~2행은 제목). 품목코드를 못 찾은 항목은 ERP_확인필요.xlsx로 따로 나옵니다.\n"
      "· 거래일자는 주문서 파일명(예: 주문서 9.30 통합)에서 자동으로 채워지며 직접 고칠 수 있습니다.\n"
-     "· 처음 한 번, ERP에서 받은 품목정보관리.xls를 단가표 줄의 [변경]으로 넣어 주세요(이후 기억). 단가가 바뀌면 새 파일로 다시 넣습니다. [제이 품목거래]는 제이스토어·제이쿠팡·제이개인의 품목을 합산한 양식입니다."),
+     "· 처음 한 번, ERP에서 받은 품목정보관리.xls를 단가표 줄의 [변경]으로 넣어 주세요(이후 기억). 단가가 바뀌면 새 파일로 다시 넣습니다. [제이 품목거래]는 제이스토어·제이쿠팡·제이개인의 품목을 합산한 양식입니다.\n"
+     "· 기준을 '제이제이'로 바꾸면 매입·매출 파일만으로 제이제이 ERP용 일괄등록 파일을 만듭니다(주문서·원장 불필요). 단가표는 제이제이 ERP의 품목정보관리.xls를 따로 넣고, 매입·매출 집계 때 회사명을 꼭 골라야 합니다."),
     ("저장 폴더",
      "처음 한 번 [변경]으로 지정하면 기억합니다. 모든 결과는 그 폴더 안에 날짜·시간별로 자동 정리되어 나중에 찾기 쉽습니다."),
     ("주문서 규칙",
@@ -908,16 +910,24 @@ class App(ctk.CTk):
             self.erp_slots[key] = self._erp_mini_slot(lc, key, label)
         ctk.CTkFrame(lc, fg_color="transparent", height=4).pack()
         self.btn_erp_w = self._main_btn(left, "결과 파일 2개 만들기", "erp", command=self.run_erp, pady=(10, 0))
-        self.btn_erp = _Btn(self.btn_erp_w, lambda: "   결과 파일 2개 만들기", lambda on: self._style_main_btn(self.btn_erp_w, on))
-        ctk.CTkLabel(left, text="원장비교결과 · ERP_판매구매일괄등록 파일이 매입파일 폴더에 저장됩니다.", font=self.f(12),
+        self.btn_erp = _Btn(self.btn_erp_w, lambda: "   " + self._erp_btn_text(), lambda on: self._style_main_btn(self.btn_erp_w, on))
+        ctk.CTkLabel(left, text="결과 파일은 매입파일이 있는 폴더에 저장됩니다.", font=self.f(12),
                      text_color=OPT).pack(pady=(6, 0))
 
         right.grid_rowconfigure(2, weight=1)
         # 설정: 거래일자 · 단가표
         sc = self._card(right)
         sc.grid(row=0, column=0, sticky="ew")
+        r0 = ctk.CTkFrame(sc, fg_color="transparent")
+        r0.pack(fill="x", padx=18, pady=(12, 0))
+        ctk.CTkLabel(r0, text="기준", font=self.f(12), text_color=SUB, width=64, anchor="w").pack(side="left")
+        self.erp_mode_var = tk.StringVar(value=self.config.get("ERP기준") if self.config.get("ERP기준") in ERP_MODES else ERP_MODES[0])
+        ctk.CTkSegmentedButton(r0, values=list(ERP_MODES), variable=self.erp_mode_var, height=30, corner_radius=8,
+                               font=self.f(12, "semi"), fg_color=BG, unselected_color=BG, unselected_hover_color=CARD_BD,
+                               selected_color=SEL_BD, selected_hover_color=SEL_BD, text_color=INK,
+                               command=self._erp_mode_changed).pack(side="left", fill="x", expand=True, padx=(6, 0))
         r1 = ctk.CTkFrame(sc, fg_color="transparent")
-        r1.pack(fill="x", padx=18, pady=(12, 6))
+        r1.pack(fill="x", padx=18, pady=(8, 6))
         ctk.CTkLabel(r1, text="거래일자", font=self.f(12), text_color=SUB, width=64, anchor="w").pack(side="left")
         self.erp_date_var = tk.StringVar(value="")
         ctk.CTkEntry(r1, textvariable=self.erp_date_var, width=118, height=30, corner_radius=8, border_width=BW,
@@ -960,7 +970,30 @@ class App(ctk.CTk):
         return scr
 
     # ── ERP 접점 ──
+    def _erp_jj(self):
+        v = getattr(self, "erp_mode_var", None)
+        return bool(v) and v.get() == "제이제이"
+
+    def _erp_btn_text(self):
+        return "일괄등록 파일 만들기" if self._erp_jj() else "결과 파일 2개 만들기"
+
+    def _erp_need(self):
+        return ("purchase", "sales") if self._erp_jj() else ("purchase", "sales", "order")
+
+    def _erp_mode_changed(self, _v=None):
+        self.config["ERP기준"] = self.erp_mode_var.get()
+        self._save_config()
+        self._erp_refresh_pricelist_label()
+        self._refresh_erp()
+        self._log_target = "erp"
+        if self._erp_jj():
+            self.log("기준: 제이제이 — 매입·매출 파일만으로 일괄등록 파일을 만듭니다. (주문서·원장은 쓰지 않음, 단가표는 제이제이 ERP 것)")
+        else:
+            self.log("기준: 아이스앤팩 — 원장 비교 + 일괄등록 파일을 만듭니다.")
+
     def _erp_pricelist_path(self):
+        if self._erp_jj():                       # 회사마다 ERP 품목코드가 달라 단가표를 따로 기억
+            return self.config.get("단가표_제이제이") or ""
         p = self.config.get("단가표")
         if p and os.path.exists(p):
             return p
@@ -970,7 +1003,8 @@ class App(ctk.CTk):
         p = self._erp_pricelist_path()
         try:
             when = datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%d")
-            self.erp_price_lbl.configure(text="%s · %s" % (when, "내장" if not self.config.get("단가표") else "교체됨"), text_color=INK)
+            tag = "제이제이" if self._erp_jj() else ("내장" if not self.config.get("단가표") else "교체됨")
+            self.erp_price_lbl.configure(text="%s · %s" % (when, tag), text_color=INK)
         except OSError:
             self.erp_price_lbl.configure(text="없음 · [변경]으로 넣기", text_color=REQ)
 
@@ -978,16 +1012,18 @@ class App(ctk.CTk):
         path = filedialog.askopenfilename(title="ERP 품목정보관리.xls 선택", filetypes=[("엑셀", "*.xls *.xlsx"), ("모든 파일", "*.*")])
         if not path:
             return
+        jj = self._erp_jj()
+        self._log_target = "erp"
         try:
-            n = len(ERP.load_erp_map(path))
+            n = len(ERP.load_jj_items(path)[1]) if jj else len(ERP.load_erp_map(path))
         except Exception as ex:
             self.log("⚠️ 단가표를 읽지 못했어요: %s" % ex); return
-        dst_dir = os.path.join(G0.app_dir(), "ERP단가표")
+        dst_dir = os.path.join(G0.app_dir(), "ERP단가표", "제이제이") if jj else os.path.join(G0.app_dir(), "ERP단가표")
         os.makedirs(dst_dir, exist_ok=True)
         dst = os.path.join(dst_dir, "품목정보관리.xls")
         import shutil
         shutil.copy2(path, dst)
-        self.config["단가표"] = dst
+        self.config["단가표_제이제이" if jj else "단가표"] = dst
         self._save_config()
         self._erp_refresh_pricelist_label()
         self.log("ERP 단가표 갱신: %s (품목 %d개)" % (os.path.basename(path), n))
@@ -1007,6 +1043,8 @@ class App(ctk.CTk):
         if key == "order":
             d = ERP.trade_date_from_name(path) or self._date_from_dirs(path) or datetime.date.today()
             self.erp_date_var.set(d.strftime("%Y-%m-%d"))
+        elif key == "purchase" and not self.erp_date_var.get().strip():
+            self.erp_date_var.set((self._date_from_dirs(path) or datetime.date.today()).strftime("%Y-%m-%d"))
         self._refresh_erp()
 
     @staticmethod
@@ -1064,9 +1102,12 @@ class App(ctk.CTk):
             auto[key] = path
 
     def _refresh_erp(self):
-        ok = all(self.erp_files.get(k) for k in ("purchase", "sales", "order"))
+        ok = all(self.erp_files.get(k) for k in self._erp_need())
         self.btn_erp.set_enabled(ok and not self._busy)
-        self.btn_jay_w.configure(state="normal" if (self.erp_files.get("purchase") and not self._busy) else "disabled")
+        if not self._busy:
+            self.btn_erp.set_text(self._erp_btn_text())
+        jay_ok = self.erp_files.get("purchase") and not self._busy and not self._erp_jj()      # 제이 품목거래는 아이스앤팩 전용
+        self.btn_jay_w.configure(state="normal" if jay_ok else "disabled")
 
     def _erp_trade_date(self):
         s = self.erp_date_var.get().strip()
@@ -1076,30 +1117,36 @@ class App(ctk.CTk):
             return None
 
     def run_erp(self):
-        if self._busy or not all(self.erp_files.get(k) for k in ("purchase", "sales", "order")):
+        if self._busy or not all(self.erp_files.get(k) for k in self._erp_need()):
             return
+        self._log_target = "erp"
         date = self._erp_trade_date()
         if date is None:
             self.log("⚠️ 거래일자를 YYYY-MM-DD 형식으로 입력해 주세요. (예: %s)" % datetime.date.today().strftime("%Y-%m-%d")); return
         if not os.path.exists(self._erp_pricelist_path()):
-            self.log("⚠️ ERP 단가표(품목정보관리.xls)가 없어요. 단가표 [변경]으로 넣어 주세요."); return
+            self.log("⚠️ %sERP 단가표(품목정보관리.xls)가 없어요. 단가표 [변경]으로 넣어 주세요." % ("제이제이 " if self._erp_jj() else "")); return
         self._busy = True
         self._log_target = "erp"
         self.btn_erp.set_enabled(False); self.btn_erp.set_text("만드는 중…")
         self.btn_jay_w.configure(state="disabled")
         self.erp_result = None
         self.log("─" * 30)
-        self.log("원장 비교 → ERP 입력파일 생성을 시작합니다... (거래일자 %s)" % date)
-        threading.Thread(target=self._erp_worker, args=(date,), daemon=True).start()
+        jj = self._erp_jj()
+        self.log(("제이제이 기준 ERP 입력파일 생성을 시작합니다... (거래일자 %s)" if jj else "원장 비교 → ERP 입력파일 생성을 시작합니다... (거래일자 %s)") % date)
+        threading.Thread(target=self._erp_worker, args=(date, jj), daemon=True).start()
 
-    def _erp_worker(self, date):
-        res = {}
+    def _erp_worker(self, date, jj=False):
+        res = {"jj": jj}
         try:
             f = self.erp_files
-            ledgers = {lb: f.get(k) or "" for k, lb in LEDGER_OWNERS}
-            res["cmp"] = ERP.build_ledger_comparison(f["purchase"], f["sales"], f["order"], self._erp_pricelist_path(), ledgers, log=self.log)
-            res["erp"] = ERP.build_erp_upload(f["purchase"], f["sales"], f["order"], self._erp_pricelist_path(),
-                                              os.path.join(ERP_DIR, "판매구매일괄등록.xls"), date, log=self.log)
+            if jj:
+                res["erp"] = ERP.build_jj_erp_upload(f["purchase"], f["sales"], self._erp_pricelist_path(),
+                                                     os.path.join(ERP_DIR, "판매구매일괄등록.xls"), date, log=self.log)
+            else:
+                ledgers = {lb: f.get(k) or "" for k, lb in LEDGER_OWNERS}
+                res["cmp"] = ERP.build_ledger_comparison(f["purchase"], f["sales"], f["order"], self._erp_pricelist_path(), ledgers, log=self.log)
+                res["erp"] = ERP.build_erp_upload(f["purchase"], f["sales"], f["order"], self._erp_pricelist_path(),
+                                                  os.path.join(ERP_DIR, "판매구매일괄등록.xls"), date, log=self.log)
             e = res["erp"]
             if e["out"]:
                 self.log("💾 저장 완료: " + os.path.dirname(e["out"]))
@@ -1111,7 +1158,7 @@ class App(ctk.CTk):
             self.log(G0.traceback.format_exc())
         finally:
             self._busy = False
-            self.root.after(0, lambda: (self._show_erp(res), self.btn_erp.set_text("결과 파일 2개 만들기"), self._refresh_erp()))
+            self.root.after(0, lambda: (self._show_erp(res), self._refresh_erp()))
 
     def _show_erp(self, res):
         self.erp_result = res
@@ -1136,7 +1183,8 @@ class App(ctk.CTk):
             self._table_row(self.erp_cmp, ("합계", format(total_n, ","), format(total_m, ",")), bold=True, bg=TOTAL_BG, h=28)
             self.erp_count.configure(text="불일치 %d건" % total_m if total_m else "모두 일치", text_color=WARN_TXT if total_m else BRAND)
         else:
-            ctk.CTkLabel(self.erp_cmp, text="원장이 없어 비교를 건너뛰었습니다.", font=self.f(13), text_color=OPT).pack(pady=8)
+            msg = "제이제이 기준은 원장 비교 없이 일괄등록 파일만 만듭니다." if res.get("jj") else "원장이 없어 비교를 건너뛰었습니다."
+            ctk.CTkLabel(self.erp_cmp, text=msg, font=self.f(13), text_color=OPT, wraplength=260).pack(pady=8)
             self.erp_count.configure(text="—", text_color=FAINT)
         st.configure(text="● 완료", text_color=BRAND)
 

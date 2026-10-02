@@ -156,6 +156,8 @@ def order_sheet_name(alias):
         (r'^제이무역쿠팡[/-](.+)$', lambda m: '제이무역쿠팡-' + m.group(1)),
         (r'^무역\s*스토어$', lambda m: '제이무역스토어'), (r'^무역\s*쿠팡$', lambda m: '제이무역쿠팡'),
         (r'^제이개인/(.+)$', lambda m: '제이개인 ' + m.group(1)),
+        (r'^용차스토어/제이무역/(.+)$', lambda m: '제이무역스토어-' + m.group(1)),
+        (r'^용차쿠팡/제이무역/(.+)$', lambda m: '제이무역쿠팡-' + m.group(1)),
         (r'^용차스토어/다모아/(.+)$', lambda m: '다모아스토어-' + m.group(1)),
         (r'^용차스토어/제이/(.+)$', lambda m: '제이스토어-' + m.group(1)),
         (r'^용차쿠팡/다모아/(.+)$', lambda m: '다모아쿠팡-' + m.group(1)),
@@ -220,6 +222,8 @@ def purchase_sheet_to_remark(sheet_name):
         (r'^제이스토어$', lambda m: '청년몰-제이 스토어'), (r'^제이쿠팡$', lambda m: '청년몰-제이 쿠팡'),
         (r'^다모아개인[\s/\-]+(.+)$', lambda m: '청년몰-다모아 개인/' + m.group(1)),
         (r'^제이개인[\s/\-]+(.+)$', lambda m: '청년몰-제이 개인/' + m.group(1)),
+        (r'^용차스토어[\s/\-]+제이무역[\s/\-]+(.+)$', lambda m: '청년몰-제이무역 스토어/' + m.group(1)),
+        (r'^용차쿠팡[\s/\-]+제이무역[\s/\-]+(.+)$', lambda m: '청년몰-제이무역 쿠팡/' + m.group(1)),
         (r'^용차스토어[\s/\-]+다모아[\s/\-]+(.+)$', lambda m: '청년몰-다모아 스토어/' + m.group(1)),
         (r'^용차스토어[\s/\-]+제이[\s/\-]+(.+)$', lambda m: '청년몰-제이 스토어/' + m.group(1)),
         (r'^용차쿠팡[\s/\-]+다모아[\s/\-]+(.+)$', lambda m: '청년몰-다모아 쿠팡/' + m.group(1)),
@@ -297,6 +301,7 @@ def order_shipping_category(alias):
         (r'^제이개인(?:[/-].+)?$', ('제이제이', '제이개인')),
         (r'^다모아스토어(?:[/-].+)?$', ('다모아', '다모아스토어')), (r'^다모아쿠팡(?:[/-].+)?$', ('다모아', '다모아쿠팡')),
         (r'^다모아개인(?:[/-].+)?$', ('다모아', '다모아개인')),
+        (r'^용차스토어/제이무역(?:/.+)?$', ('제이무역', '제이무역스토어')), (r'^용차쿠팡/제이무역(?:/.+)?$', ('제이무역', '제이무역쿠팡')),
         (r'^용차스토어/다모아(?:/.+)?$', ('다모아', '다모아스토어')), (r'^용차쿠팡/다모아(?:/.+)?$', ('다모아', '다모아쿠팡')),
         (r'^용차개인/다모아(?:/.+)?$', ('다모아', '다모아개인')),
         (r'^용차스토어/제이(?:/.+)?$', ('제이제이', '제이스토어')), (r'^용차쿠팡/제이(?:/.+)?$', ('제이제이', '제이쿠팡')),
@@ -466,10 +471,14 @@ def read_sales_transactions(order_path):
 def read_settlement_totals(sales_path):
     totals = {}
     for sheet, rows in _rows(sales_path).items():
-        remark = normalize_remark(sheet)
+        vehicle = re.match(r'^용차(?:스토어|쿠팡)', _s(sheet)) is not None
+        try:
+            remark = purchase_sheet_to_remark(sheet) if vehicle else normalize_remark(sheet)
+        except ValueError:
+            continue
         if '개인' in remark:
             continue
-        if not (re.match(r'^청년몰-(?:제이|다모아) (?:스토어|쿠팡)$', remark) or re.match(r'^청년몰-제이무역 (?:스토어|쿠팡)(?:/.+)?$', remark)):
+        if not vehicle and not (re.match(r'^청년몰-(?:제이|다모아) (?:스토어|쿠팡)$', remark) or re.match(r'^청년몰-제이무역 (?:스토어|쿠팡)(?:/.+)?$', remark)):
             continue
         total, found = 0.0, False
         for r in range(1, len(rows) + 1):
@@ -507,10 +516,11 @@ def _add_settlement(t, amount):
     if t['mode'] != '판매' or '개인' in t['remark']:
         return
     rk = t['remark']
-    if re.match(r'^청년몰-(?:제이|다모아) 스토어$', rk) or re.match(r'^청년몰-제이무역 스토어(?:/.+)?$', rk):
+    veh = bool(t.get('vehicle'))
+    if (veh and ' 스토어' in rk) or re.match(r'^청년몰-(?:제이|다모아) 스토어$', rk) or re.match(r'^청년몰-제이무역 스토어(?:/.+)?$', rk):
         fixed = {'code': CODE_SETTLE_STORE, 'barcode': '', 'name': '스토어정산예정금액', 'detail': '', 'unit': '건'}
         _service(t['items'], '스토어정산예정금액', CODE_SETTLE_STORE, 1.0, amount, unit='건', fixed=fixed)
-    elif re.match(r'^청년몰-(?:제이|다모아) 쿠팡$', rk) or re.match(r'^청년몰-제이무역 쿠팡(?:/.+)?$', rk):
+    elif (veh and ' 쿠팡' in rk) or re.match(r'^청년몰-(?:제이|다모아) 쿠팡$', rk) or re.match(r'^청년몰-제이무역 쿠팡(?:/.+)?$', rk):
         fixed = {'code': CODE_SETTLE_COUPANG, 'barcode': '', 'name': '쿠팡정산', 'detail': '', 'unit': '원'}
         _service(t['items'], '쿠팡정산', CODE_SETTLE_COUPANG, 1.0, amount, unit='원', fixed=fixed)
 
@@ -571,7 +581,8 @@ def build_erp_upload(purchase_path, sales_path, order_path, erp_path, template_p
         st = purchase_by[t['remark']]['service_total'] if t['remark'] in purchase_by else 0.0
         _add_service_rows(t, st, qty_by.get(t['remark'], 0.0))
         rk = t['remark']
-        if re.match(r'^청년몰-(?:제이|다모아) (?:스토어|쿠팡)$', rk) or re.match(r'^청년몰-제이무역 (?:스토어|쿠팡)(?:/.+)?$', rk):
+        # 용차스토어/용차쿠팡 판매도 정산 줄(수량 1, 단가=매출 시트 토탈)을 넣는다 (직원 요청 2026-10-02)
+        if t.get('vehicle') or re.match(r'^청년몰-(?:제이|다모아) (?:스토어|쿠팡)$', rk) or re.match(r'^청년몰-제이무역 (?:스토어|쿠팡)(?:/.+)?$', rk):
             if rk in settle:
                 _add_settlement(t, settle[rk])
             else:
@@ -1078,3 +1089,170 @@ def find_files_in_folder(folder):
         'trade': latest(r'(청년몰원장|제이무역.*원장|무역.*원장)'),
         'order': latest(r'주문서', '원장비교결과|시트분리'),
     }
+
+
+# ═══════════ ④ 제이제이컴퍼니 기준 — ERP 판매·구매 일괄등록 (v7.1) ═══════════
+# 아이스앤팩(청년몰) 기준과 달리 원장 비교·주문서가 필요 없고, 매입·매출 집계 파일만으로 만든다.
+# 규칙 출처: 대표님 확인 2026-10-02 (10/1 자료 초안 v6). '추정' 표시는 아직 직원 확인 전.
+JJ_PLACES = ('제이제이컴퍼니(유)', '본사')          # 입출고장소 = 집계 파일 A열(매입·매출 탭에서 고른 회사명)
+JJ_PURCHASE_PARTNER = {
+    '다모아': ('00021', '다모아패키지(주)'), '광구': ('00706', '대경페트산업(주)'), '단지': ('00706', '대경페트산업(주)'),
+    '올담': ('00787', '대림프라콘(주)'),
+    '제이다모아': ('00021', '다모아패키지(주)'), '원준': ('01555', '(주)원준커머스'),        # 추정
+    '위플': ('00721', '(주)위즈니스/위플'), '제이무역': ('02262', '제이제이무역'),            # 추정
+}
+JJ_PURCHASE_SKIP = {'제이': '우리 재고 — 구매 등록 없이 ERP에서 재고로 처리'}
+JJ_SALES_PARTNER = {'쿠팡': ('00009', '쿠팡'), '스마트스토어': ('00013', '스마트스토어'), '공연주님 발주': ('00482', '공연주님')}
+JJ_SALES_SKIP = {'공식홈피': '거래처 없이 재고 처리', '쿠팡발송': '거래처 없이 재고 처리', '파손 재발송': '거래처 없이 재고 처리'}
+JJ_CODE_SHIP, JJ_CODE_SETTLE = '0000000287', '0000000000'      # 택배비 / 정산예정금액  (3PL 줄은 만들지 않음)
+JJ_NAME_EXACT = {'다용도2K/KI': '다용도2K/KI(DS-1)', '다용도3K/TS': '다용도3K/TS-2', '다용도4K/DG': '다용도4K/DG-4',
+                 '유통2호/KI': '유통2호/KI(김치15k)'}
+JJ_NAME_RULES = [(re.compile(r'^프레시\s*(\d+)호$'), r'프레시 \1호(이면은박)')]
+
+
+def _jj_norm(s):
+    return re.sub(r'\s+', '', _s(s)).lower()
+
+
+def jj_erp_name(name):
+    """집계 파일의 품목명 → 제이제이 ERP 품목명."""
+    n = _s(name)
+    if n in JJ_NAME_EXACT:
+        return JJ_NAME_EXACT[n]
+    for pat, to in JJ_NAME_RULES:
+        if pat.match(n):
+            return pat.sub(to, n)
+    return n
+
+
+def load_jj_items(erp_path):
+    """제이제이 ERP 품목정보관리.xls → ({정규화 품목명: 품목}, {품목코드: 품목})"""
+    sh = xlrd.open_workbook(erp_path).sheet_by_index(0)
+    hr = next((r for r in range(min(sh.nrows, 30)) if _s(sh.cell_value(r, 0)) == '품목코드'), None)
+    if hr is None:
+        raise ValueError('품목정보관리 파일에서 "품목코드" 머리글을 찾지 못했습니다.')
+    by_name, by_code = {}, {}
+    for r in range(hr + 1, sh.nrows):
+        v = sh.row_values(r)
+        it = {'code': _s(v[0]), 'name': _s(v[1]), 'detail': _s(v[2]), 'unit': _s(v[3]), 'barcode': _s(v[8]), 'buy': _num(v[9])}
+        if it['name']:
+            by_name.setdefault(_jj_norm(it['name']), it)
+            by_code[it['code']] = it
+    return by_name, by_code
+
+
+def _jj_read(path, total_label):
+    out = []
+    for sh in xlrd.open_workbook(path).sheets():
+        items, total, place = [], 0.0, ''
+        for r in range(sh.nrows):
+            a, name = _s(sh.cell_value(r, 0)), _s(sh.cell_value(r, 3))
+            place = place or a
+            if name:
+                items.append((name, _num(sh.cell_value(r, 6))))
+            if sh.ncols > 18 and total_label in _s(sh.cell_value(r, 18)):
+                total += _num(sh.cell_value(r, 17))
+        out.append((sh.name, items, total, place))
+    return out
+
+
+def build_jj_erp_upload(purchase_path, sales_path, erp_path, template_path, trade_date, out_dir=None, log=print):
+    """제이제이컴퍼니 기준 일괄등록 파일. 구매: 품목 + 택배비(수량=금액, 단가 1). 판매: 품목(단가 0) + 정산예정금액."""
+    for p in (purchase_path, sales_path, erp_path, template_path):
+        if not p or not os.path.exists(p):
+            raise ValueError('파일을 찾을 수 없습니다: %s' % p)
+    out_dir = out_dir or os.path.dirname(purchase_path)
+    by_name, by_code = load_jj_items(erp_path)
+    for code, label in ((JJ_CODE_SHIP, '택배비'), (JJ_CODE_SETTLE, '정산예정금액')):
+        if code not in by_code:
+            raise ValueError('단가표에 %s(%s) 품목이 없습니다. 제이제이 ERP의 품목정보관리.xls 인지 확인해 주세요.' % (label, code))
+    trans, issues, skipped = [], [], []
+
+    def add(mode, sheet, partner, items, extra, place):
+        if place not in JJ_PLACES:
+            raise ValueError('"%s" 시트의 A열이 회사명이 아닙니다(%s). 매입·매출 화면에서 회사명(제이제이컴퍼니(유)/본사)을 고르고 집계한 파일을 넣어 주세요.'
+                             % (sheet, place or '빈칸'))
+        lines = []
+        for name, qty in items:
+            it = by_name.get(_jj_norm(jj_erp_name(name)))
+            if not it:
+                issues.append({'mode': mode, 'remark': sheet, 'code': partner[0], 'partner': partner[1], 'item': name, 'qty': qty,
+                               'error': 'ERP 품목정보관리에 같은 이름의 품목이 없음', 'key': jj_erp_name(name)})
+                continue
+            price = it['buy'] if mode == '구매' else 0.0
+            supply = _round(qty * price)
+            lines.append((it, qty, price, supply, _round(supply * 0.1), False))
+        for code, qty, price in extra:
+            it = by_code[code]
+            if mode == '구매':
+                supply = _round(qty * price); vat = _round(supply * 0.1)
+            else:                                   # 정산예정금액: 부가세 포함 금액을 나눔
+                total = _round(qty * price); supply = _round(total / 1.1); vat = total - supply
+            lines.append((it, qty, price, supply, vat, True))
+        if lines:
+            trans.append({'mode': mode, 'remark': sheet, 'partner': partner, 'place': place, 'lines': lines})
+
+    for sheet, items, ship, place in _jj_read(purchase_path, '배송비합계'):
+        if sheet in JJ_PURCHASE_SKIP:
+            skipped.append(('구매', sheet, JJ_PURCHASE_SKIP[sheet])); continue
+        partner = JJ_PURCHASE_PARTNER.get(sheet)
+        if not partner:
+            issues.append({'mode': '구매', 'remark': sheet, 'code': '', 'partner': '', 'item': '(시트 전체)', 'qty': len(items),
+                           'error': '이 출고지를 어느 거래처로 올릴지 규칙이 없음', 'key': sheet})
+            continue
+        add('구매', sheet, partner, items, [(JJ_CODE_SHIP, ship, 1.0)] if ship else [], place)
+    for sheet, items, settle, place in _jj_read(sales_path, '정산예정금액'):
+        if sheet in JJ_SALES_SKIP:
+            skipped.append(('판매', sheet, JJ_SALES_SKIP[sheet])); continue
+        partner = JJ_SALES_PARTNER.get(sheet)
+        if not partner:
+            issues.append({'mode': '판매', 'remark': sheet, 'code': '', 'partner': '', 'item': '(시트 전체)', 'qty': len(items),
+                           'error': '이 판매처를 어느 거래처로 올릴지 규칙이 없음', 'key': sheet})
+            continue
+        add('판매', sheet, partner, items, [(JJ_CODE_SETTLE, 1.0, settle)], place)
+
+    for mode, sheet, why in skipped:
+        log('제외(%s): %s — %s' % (mode, sheet, why))
+    stamp = datetime.datetime.now().strftime('%H%M%S')
+    issues_path = None
+    if issues:
+        issues_path = os.path.join(out_dir, 'ERP_확인필요_%s_%s.xlsx' % (trade_date.strftime('%Y%m%d'), stamp))
+        _write_issues(issues, issues_path)
+        log('ERP 확인필요 %d건: %s' % (len(issues), os.path.basename(issues_path)))
+    n_lines = sum(len(t['lines']) for t in trans)
+    if not n_lines:
+        return {'out': None, 'issues_path': issues_path, 'issues': issues, 'transactions': 0, 'lines': 0, 'rows': [], 'skipped': skipped}
+
+    out_path = os.path.join(out_dir, 'ERP_판매구매일괄등록_%s_%s.xls' % (trade_date.strftime('%Y%m%d'), stamp))
+    rb = xlrd.open_workbook(template_path, formatting_info=True)
+    wb = xl_copy(rb)
+    ws = wb.get_sheet(rb.sheet_names().index('대량등록양식'))
+    txt, date_st, num_st = _xls_style(textfmt=True), _xls_style(datefmt=True), _xls_style(numfmt='#,##0.###')
+    bold_txt, bold_num = _xls_style(bold=True, textfmt=True), _xls_style(bold=True, numfmt='#,##0.###')
+    bold = _xls_style(bold=True)
+    r, preview = 2, []
+    for t in trans:
+        for i, (it, qty, price, supply, vat, svc) in enumerate(t['lines']):
+            if i == 0:
+                ws.write(r, 0, t['mode']); ws.write(r, 1, t['partner'][0], txt); ws.write(r, 2, t['partner'][1])
+                ws.write(r, 3, datetime.datetime(trade_date.year, trade_date.month, trade_date.day), date_st)
+                ws.write(r, 4, '상품매출' if t['mode'] == '판매' else '상품')
+                ws.write(r, 5, '건별/부가세포함' if t['mode'] == '판매' else '과세/부가세별도10%')
+                ws.write(r, 6, t['remark']); ws.write(r, 12, t['place'])
+            ws.write(r, 13, it['code'], bold_txt if svc else txt); ws.write(r, 14, it['barcode'], txt)
+            if svc:
+                ws.write(r, 15, it['name'], bold)
+            else:
+                ws.write(r, 15, it['name'])
+            ws.write(r, 16, it['detail']); ws.write(r, 17, it['unit'])
+            ws.write(r, 18, qty, bold_num if svc else num_st); ws.write(r, 21, price, num_st)
+            ws.write(r, 22, supply, num_st); ws.write(r, 23, vat, num_st)
+            preview.append((t['mode'] if i == 0 else '', t['remark'] if i == 0 else '', it['name'], qty, price, supply, vat))
+            r += 1
+    for c in range(25):
+        ws.col(c).width = 256 * 14
+    ws.col(15).width = 256 * 30
+    wb.save(out_path)
+    log('ERP 입력파일 완료: %s (거래 %d건 · 품목 %d줄)' % (os.path.basename(out_path), len(trans), n_lines))
+    return {'out': out_path, 'issues_path': issues_path, 'issues': issues, 'transactions': len(trans), 'lines': n_lines,
+            'rows': preview, 'skipped': skipped}

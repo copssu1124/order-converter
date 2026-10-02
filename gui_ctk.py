@@ -64,7 +64,7 @@ HELP_SECTIONS = [
      "· ERP_판매구매일괄등록.xls — ERP 대량등록 양식. 구매(청년몰-제이/다모아/제이무역)와 판매(스마트스토어/쿠팡)가 적요별로 짝지어 들어갑니다.\n"
      "  ERP에 올릴 때 '행 범위' 시작을 3으로 바꾸세요(1~2행은 제목). 품목코드를 못 찾은 항목은 ERP_확인필요.xlsx로 따로 나옵니다.\n"
      "· 거래일자는 주문서 파일명(예: 주문서 9.30 통합)에서 자동으로 채워지며 직접 고칠 수 있습니다.\n"
-     "· 단가가 바뀌면 ERP에서 받은 품목정보관리.xls를 단가표 줄의 [변경]으로 넣어 주세요. [제이 품목거래]는 제이스토어·제이쿠팡·제이개인의 품목을 합산한 양식입니다."),
+     "· 처음 한 번, ERP에서 받은 품목정보관리.xls를 단가표 줄의 [변경]으로 넣어 주세요(이후 기억). 단가가 바뀌면 새 파일로 다시 넣습니다. [제이 품목거래]는 제이스토어·제이쿠팡·제이개인의 품목을 합산한 양식입니다."),
     ("저장 폴더",
      "처음 한 번 [변경]으로 지정하면 기억합니다. 모든 결과는 그 폴더 안에 날짜·시간별로 자동 정리되어 나중에 찾기 쉽습니다."),
     ("주문서 규칙",
@@ -972,7 +972,7 @@ class App(ctk.CTk):
             when = datetime.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%d")
             self.erp_price_lbl.configure(text="%s · %s" % (when, "내장" if not self.config.get("단가표") else "교체됨"), text_color=INK)
         except OSError:
-            self.erp_price_lbl.configure(text="단가표 없음 — [변경]으로 넣어 주세요", text_color=REQ)
+            self.erp_price_lbl.configure(text="없음 · [변경]으로 넣기", text_color=REQ)
 
     def _erp_update_pricelist(self):
         path = filedialog.askopenfilename(title="ERP 품목정보관리.xls 선택", filetypes=[("엑셀", "*.xls *.xlsx"), ("모든 파일", "*.*")])

@@ -1106,6 +1106,7 @@ JJ_PURCHASE_SKIP = {'제이': '우리 재고 — 구매 등록 없이 ERP에서 
 JJ_SALES_PARTNER = {'쿠팡': ('00009', '쿠팡'), '스마트스토어': ('00013', '스마트스토어'), '공연주님 발주': ('00482', '공연주님'),
                     '공식홈피': ('02196', '고도몰')}       # 공식홈피 = 고도몰 (대표님 2026-10-02)
 JJ_SALES_SKIP = {'쿠팡발송': '거래처 없이 재고 처리', '파손 재발송': '거래처 없이 재고 처리'}
+JJ_PARTNER_ESM = ('00012', '옥션지마켓')          # ESM(옥션·지마켓) 주문 — 시트명에 esm/옥션/지마켓 (대표님 2026-11-02)
 JJ_CODE_SHIP, JJ_CODE_SETTLE = '0000000287', '0000000000'      # 택배비 / 정산예정금액  (3PL 줄은 만들지 않음)
 JJ_NAME_EXACT = {'다용도2K/KI': '다용도2K/KI(DS-1)', '다용도3K/TS': '다용도3K/TS-2', '다용도4K/DG': '다용도4K/DG-4',
                  '유통2호/KI': '유통2호/KI(김치15k)'}
@@ -1206,7 +1207,7 @@ def build_jj_erp_upload(purchase_path, sales_path, erp_path, template_path, trad
     for sheet, items, settle, place in _jj_read(sales_path, '정산예정금액'):
         if sheet in JJ_SALES_SKIP:
             skipped.append(('판매', sheet, JJ_SALES_SKIP[sheet])); continue
-        partner = JJ_SALES_PARTNER.get(sheet)
+        partner = JJ_SALES_PARTNER.get(sheet) or (JJ_PARTNER_ESM if re.search(r'esm|옥션|지마켓', sheet, re.I) else None)   # ESM 주문 = 옥션지마켓
         if not partner:
             issues.append({'mode': '판매', 'remark': sheet, 'code': '', 'partner': '', 'item': '(시트 전체)', 'qty': len(items),
                            'error': '이 판매처를 어느 거래처로 올릴지 규칙이 없음', 'key': sheet})
